@@ -40,12 +40,21 @@ RELEASE_NAME="${RELEASE_NAME:-${DEFAULT_RELEASE_NAME}}"
 CROSSPLANE_VERSION="${CROSSPLANE_VERSION:-}"
 
 #######################################
+# Print current timestamp in ISO format.
+# Outputs:
+#   Formatted timestamp string (YYYY-MM-DD HH:MM:SS).
+#######################################
+timestamp() {
+  date '+%Y-%m-%d %H:%M:%S'
+}
+
+#######################################
 # Print an informational message to stdout.
 # Arguments:
 #   Message string.
 #######################################
 log_info() {
-  echo -e "${COLOR_BLUE}[INFO]${COLOR_NC} $*"
+  echo -e "[$(timestamp)] ${COLOR_BLUE}[INFO]${COLOR_NC} $*"
 }
 
 #######################################
@@ -54,7 +63,7 @@ log_info() {
 #   Message string.
 #######################################
 log_success() {
-  echo -e "${COLOR_GREEN}[SUCCESS]${COLOR_NC} $*"
+  echo -e "[$(timestamp)] ${COLOR_GREEN}[SUCCESS]${COLOR_NC} $*"
 }
 
 #######################################
@@ -63,7 +72,7 @@ log_success() {
 #   Message string.
 #######################################
 log_warn() {
-  echo -e "${COLOR_YELLOW}[WARN]${COLOR_NC} $*" >&2
+  echo -e "[$(timestamp)] ${COLOR_YELLOW}[WARN]${COLOR_NC} $*" >&2
 }
 
 #######################################
@@ -72,7 +81,7 @@ log_warn() {
 #   Message string.
 #######################################
 log_error() {
-  echo -e "${COLOR_RED}[ERROR]${COLOR_NC} $*" >&2
+  echo -e "[$(timestamp)] ${COLOR_RED}[ERROR]${COLOR_NC} $*" >&2
 }
 
 #######################################

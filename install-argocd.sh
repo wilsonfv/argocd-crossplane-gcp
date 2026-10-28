@@ -48,6 +48,16 @@ AUTOPILOT="${AUTOPILOT:-${DEFAULT_AUTOPILOT}}"
 MACHINE_TYPE="${MACHINE_TYPE:-${DEFAULT_MACHINE_TYPE}}"
 NUM_NODES="${NUM_NODES:-${DEFAULT_NUM_NODES}}"
 AUTO_APPROVE="${AUTO_APPROVE:-false}"
+DELETE_CLUSTER="${DELETE_CLUSTER:-false}"
+
+#######################################
+# Print current timestamp in ISO format.
+# Outputs:
+#   Formatted timestamp string (YYYY-MM-DD HH:MM:SS).
+#######################################
+timestamp() {
+  date '+%Y-%m-%d %H:%M:%S'
+}
 
 #######################################
 # Print an informational message to stdout.
@@ -55,7 +65,7 @@ AUTO_APPROVE="${AUTO_APPROVE:-false}"
 #   Message string.
 #######################################
 log_info() {
-  echo -e "${COLOR_BLUE}[INFO]${COLOR_NC} $*"
+  echo -e "[$(timestamp)] ${COLOR_BLUE}[INFO]${COLOR_NC} $*"
 }
 
 #######################################
@@ -64,7 +74,7 @@ log_info() {
 #   Message string.
 #######################################
 log_success() {
-  echo -e "${COLOR_GREEN}[SUCCESS]${COLOR_NC} $*"
+  echo -e "[$(timestamp)] ${COLOR_GREEN}[SUCCESS]${COLOR_NC} $*"
 }
 
 #######################################
@@ -73,7 +83,7 @@ log_success() {
 #   Message string.
 #######################################
 log_warn() {
-  echo -e "${COLOR_YELLOW}[WARN]${COLOR_NC} $*" >&2
+  echo -e "[$(timestamp)] ${COLOR_YELLOW}[WARN]${COLOR_NC} $*" >&2
 }
 
 #######################################
@@ -82,7 +92,7 @@ log_warn() {
 #   Message string.
 #######################################
 log_error() {
-  echo -e "${COLOR_RED}[ERROR]${COLOR_NC} $*" >&2
+  echo -e "[$(timestamp)] ${COLOR_RED}[ERROR]${COLOR_NC} $*" >&2
 }
 
 #######################################
@@ -107,7 +117,7 @@ usage() {
   cat <<EOF
 Usage: $(basename "$0") [OPTIONS]
 
-Installs the latest version of Argo CD on GKE in the active GCP project.
+Installs the latest version of Argo CD on GKE, or deletes the GKE cluster.
 
 Options:
   -p, --project PROJECT_ID     GCP Project ID (default: read from 'gcloud config list' -> ${display_project})
@@ -117,19 +127,20 @@ Options:
   -n, --namespace NAMESPACE    Argo CD namespace (default: ${NAMESPACE})
   -e, --expose TYPE            Service type: ClusterIP | LoadBalancer (default: ${EXPOSE_TYPE})
       --autopilot              Create GKE Autopilot cluster if cluster does not exist
-  -y, --yes                    Auto-approve cluster creation if missing
+  -d, --delete                 Delete the specified GKE cluster
+  -y, --yes                    Auto-approve cluster creation or deletion
   -h, --help                   Show this help message
 
 Environment Variables:
   PROJECT_ID, CLUSTER_NAME, REGION, ZONE, NETWORK, SUBNET, POD_RANGE, SERVICE_RANGE,
-  NAMESPACE, EXPOSE_TYPE, AUTOPILOT, MACHINE_TYPE, NUM_NODES, AUTO_APPROVE
+  NAMESPACE, EXPOSE_TYPE, AUTOPILOT, MACHINE_TYPE, NUM_NODES, AUTO_APPROVE, DELETE_CLUSTER
 EOF
 }
 
 #######################################
 # Parse command line flags.
 # Globals:
-#   PROJECT_ID, CLUSTER_NAME, REGION, ZONE, NAMESPACE, EXPOSE_TYPE, AUTOPILOT, AUTO_APPROVE
+#   PROJECT_ID, CLUSTER_NAME, REGION, ZONE, NAMESPACE, EXPOSE_TYPE, AUTOPILOT, AUTO_APPROVE, DELETE_CLUSTER
 # Arguments:
 #   Command line arguments.
 #######################################
@@ -162,6 +173,10 @@ parse_flags() {
         ;;
       --autopilot)
         AUTOPILOT="true"
+        shift
+        ;;
+      -d|--delete)
+        DELETE_CLUSTER="true"
         shift
         ;;
       -y|--yes)
@@ -208,7 +223,12 @@ resolve_project_id() {
   fi
 
   if [[ -z "${NETWORK}" ]]; then
-    NETWORK="${PROJECT_ID}-internal-vpc1"
+    local detected_net
+    detected_net="$(gcloud compute networks list --project="${PROJECT_ID}" --format="value(name)" --filter="name ~ internal" --limit=1 2>/dev/null || true)"
+    if [[ -z "${detected_net}" ]]; then
+      detected_net="$(gcloud compute networks list --project="${PROJECT_ID}" --format="value(name)" --limit=1 2>/dev/null || true)"
+    fi
+    NETWORK="${detected_net:-default}"
   fi
 
   log_info "Ensuring active gcloud project is set to: ${PROJECT_ID}"
@@ -328,6 +348,55 @@ setup_cluster() {
 
   log_info "Obtaining credentials for newly created cluster '${CLUSTER_NAME}'..."
   gcloud container clusters get-credentials "${CLUSTER_NAME}" "${location_flags[@]}" --project "${PROJECT_ID}"
+}
+
+#######################################
+# Delete the specified GKE cluster.
+# Globals:
+#   PROJECT_ID, CLUSTER_NAME, REGION, ZONE, AUTO_APPROVE
+# Arguments:
+#   None.
+# Returns:
+#   0 on success, non-zero on failure.
+#######################################
+delete_cluster() {
+  local -a location_flags=()
+  local location_desc=""
+
+  if [[ -n "${ZONE}" ]]; then
+    location_flags=(--zone="${ZONE}")
+    location_desc="zone: ${ZONE}"
+  else
+    location_flags=(--region="${REGION}")
+    location_desc="region: ${REGION}"
+  fi
+
+  log_info "Checking if GKE cluster '${CLUSTER_NAME}' exists in ${location_desc}..."
+
+  if ! gcloud container clusters describe "${CLUSTER_NAME}" "${location_flags[@]}" --project "${PROJECT_ID}" &>/dev/null; then
+    log_warn "Cluster '${CLUSTER_NAME}' does not exist in project ${PROJECT_ID} (${location_desc}). Nothing to delete."
+    return 0
+  fi
+
+  local confirm="${AUTO_APPROVE}"
+  if [[ "${confirm}" != "true" ]]; then
+    echo -e "${COLOR_YELLOW}[WARN]${COLOR_NC} You are about to permanently DELETE cluster '${CLUSTER_NAME}' in project '${PROJECT_ID}' (${location_desc})."
+    echo -n "Are you sure you want to proceed? [y/N]: "
+    read -r confirm
+  fi
+
+  if [[ ! "${confirm}" =~ ^[Yy]$ && "${confirm}" != "true" ]]; then
+    log_info "Cluster deletion cancelled by user."
+    return 0
+  fi
+
+  log_info "Deleting GKE cluster '${CLUSTER_NAME}' (${location_desc})..."
+  gcloud container clusters delete "${CLUSTER_NAME}" \
+    "${location_flags[@]}" \
+    --project "${PROJECT_ID}" \
+    --quiet
+
+  log_success "GKE cluster '${CLUSTER_NAME}' successfully deleted."
 }
 
 #######################################
@@ -488,6 +557,12 @@ print_summary() {
 main() {
   parse_flags "$@"
   check_prerequisites
+
+  if [[ "${DELETE_CLUSTER}" == "true" ]]; then
+    delete_cluster
+    return 0
+  fi
+
   setup_cluster
 
   local argocd_version

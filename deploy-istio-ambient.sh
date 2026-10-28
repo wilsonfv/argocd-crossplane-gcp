@@ -37,12 +37,21 @@ ARGOCD_NAMESPACE="${ARGOCD_NAMESPACE:-${DEFAULT_ARGOCD_NAMESPACE}}"
 ISTIO_NAMESPACE="${ISTIO_NAMESPACE:-${DEFAULT_ISTIO_NAMESPACE}}"
 
 #######################################
+# Print current timestamp in ISO format.
+# Outputs:
+#   Formatted timestamp string (YYYY-MM-DD HH:MM:SS).
+#######################################
+timestamp() {
+  date '+%Y-%m-%d %H:%M:%S'
+}
+
+#######################################
 # Print an informational message to stdout.
 # Arguments:
 #   Message string.
 #######################################
 log_info() {
-  echo -e "${COLOR_BLUE}[INFO]${COLOR_NC} $*"
+  echo -e "[$(timestamp)] ${COLOR_BLUE}[INFO]${COLOR_NC} $*"
 }
 
 #######################################
@@ -51,7 +60,7 @@ log_info() {
 #   Message string.
 #######################################
 log_success() {
-  echo -e "${COLOR_GREEN}[SUCCESS]${COLOR_NC} $*"
+  echo -e "[$(timestamp)] ${COLOR_GREEN}[SUCCESS]${COLOR_NC} $*"
 }
 
 #######################################
@@ -60,7 +69,7 @@ log_success() {
 #   Message string.
 #######################################
 log_warn() {
-  echo -e "${COLOR_YELLOW}[WARN]${COLOR_NC} $*" >&2
+  echo -e "[$(timestamp)] ${COLOR_YELLOW}[WARN]${COLOR_NC} $*" >&2
 }
 
 #######################################
@@ -69,7 +78,7 @@ log_warn() {
 #   Message string.
 #######################################
 log_error() {
-  echo -e "${COLOR_RED}[ERROR]${COLOR_NC} $*" >&2
+  echo -e "[$(timestamp)] ${COLOR_RED}[ERROR]${COLOR_NC} $*" >&2
 }
 
 #######################################
@@ -244,7 +253,12 @@ connect_cluster() {
 #######################################
 ensure_dns_zone() {
   log_info "Verifying Cloud DNS zone for istio.io registry access..."
-  local network="${PROJECT_ID}-internal-vpc1"
+  local network
+  network="$(gcloud compute networks list --project="${PROJECT_ID}" --format="value(name)" --filter="name ~ internal" --limit=1 2>/dev/null || true)"
+  if [[ -z "${network}" ]]; then
+    network="$(gcloud compute networks list --project="${PROJECT_ID}" --format="value(name)" --limit=1 2>/dev/null || true)"
+  fi
+  network="${network:-default}"
 
   if ! gcloud dns managed-zones describe istio-io --project="${PROJECT_ID}" &>/dev/null; then
     log_info "Creating Cloud DNS forwarding zone 'istio-io'..."

@@ -9,7 +9,7 @@ metadata:
 spec:
   location: europe-west1
   networkRef:
-    external: mq-usecase-1-internal-vpc1
+    external: gke-vpc-network
   subnetworkRef:
     external: internal-vpc1-europe-west1-gke
   ipAllocationPolicy:

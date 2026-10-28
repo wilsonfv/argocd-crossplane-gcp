@@ -3,7 +3,7 @@ kind: Namespace
 metadata:
   name: istio-system
   labels:
-    topology.istio.io/network: mq-usecase-1-network
+    topology.istio.io/network: gke-network
 ---
 apiVersion: v1
 kind: Namespace
