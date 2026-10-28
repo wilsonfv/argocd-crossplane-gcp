@@ -1,0 +1,34 @@
+apiVersion: container.cnrm.cloud.google.com/v1beta1
+kind: ContainerCluster
+metadata:
+  name: argocd-cluster
+  namespace: config-control
+  labels:
+    environment: production
+    managed-by: gitops
+spec:
+  location: europe-west1
+  networkRef:
+    external: mq-usecase-1-internal-vpc1
+  subnetworkRef:
+    external: internal-vpc1-europe-west1-gke
+  ipAllocationPolicy:
+    useIpAliases: true
+    clusterSecondaryRangeName: gke-pod
+    servicesSecondaryRangeName: gke-service
+  releaseChannel:
+    channel: REGULAR
+  nodeConfig:
+    machineType: e2-standard-4
+    diskSizeGb: 100
+    diskType: pd-balanced
+    oauthScopes:
+      - https://www.googleapis.com/auth/cloud-platform
+  initialNodeCount: 1
+  addonsConfig:
+    httpLoadBalancing:
+      disabled: false
+    horizontalPodAutoscaling:
+      disabled: false
+    gcePersistentDiskCsiDriverConfig:
+      enabled: true

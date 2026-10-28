@@ -1,0 +1,15 @@
+# Source of truth: Istio Ztunnel (Zero Trust Tunnel) DaemonSet for Ambient Mode
+profile: ambient
+
+resources:
+  requests:
+    cpu: 200m
+    memory: 256Mi
+  limits:
+    cpu: 1000m
+    memory: 1024Mi
+
+terminationGracePeriodSeconds: 30
+
+global:
+  istioNamespace: istio-system

@@ -1,0 +1,6 @@
+# Source of truth: Istio Base CRDs and cluster-wide resources
+global:
+  istioNamespace: istio-system
+
+defaultRevision: default
+enableCRDValidation: true
