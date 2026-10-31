@@ -76,6 +76,9 @@ Automated scripts and declarative GitOps source-of-truth configurations followin
 
 ## 3. Deploy Istio Service Mesh (Ambient Mode) via Argo CD
 
+Istio Ambient Mode configurations are synchronized from the dedicated private GitOps repository:
+👉 [**github.com/wilsonfv/istio-ambient-config**](https://github.com/wilsonfv/istio-ambient-config) (Private)
+
 Istio Ambient Mode provides a transparent, sidecarless service mesh architecture:
 - **Ztunnel (Zero-Trust Tunnel)**: Node-level DaemonSet handling mTLS and L4 authorization without injecting sidecars into application pods.
 - **Istio CNI**: Redirects application traffic to node-local `ztunnel` instances (configured for GKE paths `/home/kubernetes/bin` and `/etc/cni/net.d`).
@@ -84,6 +87,11 @@ Istio Ambient Mode provides a transparent, sidecarless service mesh architecture
 To deploy via Argo CD:
 ```bash
 ./deploy-istio-ambient.sh
+```
+
+Or pass your GitHub PAT explicitly if not detected:
+```bash
+./deploy-istio-ambient.sh --token <GITHUB_PAT>
 ```
 
 ### Check Argo CD Applications Status

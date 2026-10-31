@@ -35,6 +35,7 @@ REGION="${REGION:-${DEFAULT_REGION}}"
 ZONE="${ZONE:-${DEFAULT_ZONE}}"
 ARGOCD_NAMESPACE="${ARGOCD_NAMESPACE:-${DEFAULT_ARGOCD_NAMESPACE}}"
 ISTIO_NAMESPACE="${ISTIO_NAMESPACE:-${DEFAULT_ISTIO_NAMESPACE}}"
+GITHUB_TOKEN="${GITHUB_TOKEN:-}"
 
 #######################################
 # Print current timestamp in ISO format.
@@ -110,17 +111,18 @@ Options:
   -c, --cluster CLUSTER_NAME   GKE Cluster name (default: ${CLUSTER_NAME})
   -r, --region REGION          GCP Region (default: ${REGION})
   -z, --zone ZONE              GCP Zone (optional, overrides region for zonal clusters)
+  -t, --token TOKEN            GitHub PAT Token for private repository access
   -h, --help                   Show this help message
 
 Environment Variables:
-  PROJECT_ID, CLUSTER_NAME, REGION, ZONE, ARGOCD_NAMESPACE, ISTIO_NAMESPACE
+  PROJECT_ID, CLUSTER_NAME, REGION, ZONE, ARGOCD_NAMESPACE, ISTIO_NAMESPACE, GITHUB_TOKEN
 EOF
 }
 
 #######################################
 # Parse command line flags.
 # Globals:
-#   PROJECT_ID, CLUSTER_NAME, REGION, ZONE
+#   PROJECT_ID, CLUSTER_NAME, REGION, ZONE, GITHUB_TOKEN
 # Arguments:
 #   Command line arguments.
 #######################################
@@ -141,6 +143,10 @@ parse_flags() {
         ;;
       -z|--zone)
         ZONE="$2"
+        shift 2
+        ;;
+      -t|--token)
+        GITHUB_TOKEN="$2"
         shift 2
         ;;
       -h|--help)
@@ -287,6 +293,43 @@ apply_gke_baseline() {
 }
 
 #######################################
+# Configure Argo CD repository Secret for private GitHub repo.
+# Globals:
+#   ARGOCD_NAMESPACE, GITHUB_TOKEN
+# Arguments:
+#   None.
+#######################################
+ensure_argocd_repo_secret() {
+  log_info "Verifying Argo CD credentials for private repository https://github.com/wilsonfv/istio-ambient-config.git..."
+  local secret_name="repo-istio-ambient-config"
+  local token="${GITHUB_TOKEN:-}"
+
+  if [[ -z "${token}" ]]; then
+    local remote_url
+    remote_url="$(git remote get-url origin 2>/dev/null || true)"
+    if [[ "${remote_url}" =~ oauth2:([^@]+)@ ]]; then
+      token="${BASH_REMATCH[1]}"
+    fi
+  fi
+
+  if [[ -n "${token}" ]]; then
+    kubectl create secret generic "${secret_name}" \
+      --namespace="${ARGOCD_NAMESPACE}" \
+      --from-literal=type="git" \
+      --from-literal=url="https://github.com/wilsonfv/istio-ambient-config.git" \
+      --from-literal=username="wilsonfv" \
+      --from-literal=password="${token}" \
+      --dry-run=client -o yaml | \
+      kubectl label --local -f - "argocd.argoproj.io/secret-type=repository" -o yaml | \
+      kubectl apply -f -
+    log_success "Argo CD repository secret '${secret_name}' configured."
+  else
+    log_warn "GITHUB_TOKEN not detected; skipping automatic repository secret creation."
+    log_warn "Ensure '${secret_name}' is created in namespace '${ARGOCD_NAMESPACE}'."
+  fi
+}
+
+#######################################
 # Deploy Argo CD Applications for Istio Ambient Mode.
 # Globals:
 #   ARGOCD_NAMESPACE, GITOPS_DIR
@@ -393,6 +436,7 @@ main() {
   connect_cluster
   ensure_dns_zone
   apply_gke_baseline
+  ensure_argocd_repo_secret
   deploy_argocd_apps
   wait_for_rollouts
   deploy_sample_workload

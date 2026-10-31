@@ -10,15 +10,9 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: https://istio-release.storage.googleapis.com/charts
-    chart: base
-    targetRevision: 1.30.7
-    helm:
-      valuesObject:
-        global:
-          istioNamespace: istio-system
-        defaultRevision: default
-        enableCRDValidation: true
+    repoURL: https://github.com/wilsonfv/istio-ambient-config.git
+    targetRevision: HEAD
+    path: charts/istio-base
   destination:
     server: https://kubernetes.default.svc
     namespace: istio-system

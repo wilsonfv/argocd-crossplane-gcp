@@ -10,22 +10,9 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: https://istio-release.storage.googleapis.com/charts
-    chart: ztunnel
-    targetRevision: 1.30.7
-    helm:
-      valuesObject:
-        profile: ambient
-        resources:
-          requests:
-            cpu: 200m
-            memory: 256Mi
-          limits:
-            cpu: 1000m
-            memory: 1024Mi
-        terminationGracePeriodSeconds: 30
-        global:
-          istioNamespace: istio-system
+    repoURL: https://github.com/wilsonfv/istio-ambient-config.git
+    targetRevision: HEAD
+    path: charts/istio-ztunnel
   destination:
     server: https://kubernetes.default.svc
     namespace: istio-system

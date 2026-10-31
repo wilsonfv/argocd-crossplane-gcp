@@ -10,27 +10,9 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: https://istio-release.storage.googleapis.com/charts
-    chart: istiod
-    targetRevision: 1.30.7
-    helm:
-      valuesObject:
-        profile: ambient
-        pilot:
-          env:
-            PILOT_ENABLE_AMBIENT: "true"
-          autoscaleEnabled: true
-          autoscaleMin: 1
-          autoscaleMax: 5
-          resources:
-            requests:
-              cpu: 500m
-              memory: 1024Mi
-            limits:
-              cpu: 2000m
-              memory: 2048Mi
-        global:
-          istioNamespace: istio-system
+    repoURL: https://github.com/wilsonfv/istio-ambient-config.git
+    targetRevision: HEAD
+    path: charts/istiod
   destination:
     server: https://kubernetes.default.svc
     namespace: istio-system

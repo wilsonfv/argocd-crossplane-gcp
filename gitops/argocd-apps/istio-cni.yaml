@@ -10,26 +10,9 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: https://istio-release.storage.googleapis.com/charts
-    chart: cni
-    targetRevision: 1.30.7
-    helm:
-      valuesObject:
-        profile: ambient
-        cni:
-          ambient:
-            enabled: true
-            dnsCapture: true
-            ipv6: true
-            reconcileIptablesOnStartup: true
-          cniBinDir: /home/kubernetes/bin
-          cniConfDir: /etc/cni/net.d
-          cniNetnsDir: /var/run/netns
-          excludeNamespaces:
-            - kube-system
-            - istio-system
-            - gmp-system
-            - gke-managed-cim
+    repoURL: https://github.com/wilsonfv/istio-ambient-config.git
+    targetRevision: HEAD
+    path: charts/istio-cni
   destination:
     server: https://kubernetes.default.svc
     namespace: istio-system
