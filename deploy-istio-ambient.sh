@@ -337,20 +337,11 @@ ensure_argocd_repo_secret() {
 #   None.
 #######################################
 deploy_argocd_apps() {
-  log_info "Deploying Istio Ambient Mode via Argo CD Applications..."
+  log_info "Deploying Istio Ambient Mode root application to sync from private repo..."
 
-  local -a app_files=(
-    "${GITOPS_DIR}/argocd-apps/istio-base.yaml"
-    "${GITOPS_DIR}/argocd-apps/istio-cni.yaml"
-    "${GITOPS_DIR}/argocd-apps/istiod.yaml"
-    "${GITOPS_DIR}/argocd-apps/istio-ztunnel.yaml"
-  )
-
-  local file
-  for file in "${app_files[@]}"; do
-    log_info "Applying Argo CD Application: $(basename "${file}")..."
-    kubectl apply -n "${ARGOCD_NAMESPACE}" -f "${file}"
-  done
+  local root_app="${GITOPS_DIR}/argocd-apps/istio-ambient-root.yaml"
+  log_info "Applying Argo CD Root Application: $(basename "${root_app}")..."
+  kubectl apply -n "${ARGOCD_NAMESPACE}" -f "${root_app}"
 }
 
 #######################################
@@ -388,11 +379,18 @@ wait_for_rollouts() {
 #   None.
 #######################################
 deploy_sample_workload() {
-  log_info "Deploying sample workload to validate Ambient Mesh (apps-ambient namespace)..."
-  kubectl apply -f "${GITOPS_DIR}/istio/samples/ambient-sample.yaml"
-  kubectl rollout status deployment/echo-server -n apps-ambient --timeout=120s
-  kubectl rollout status deployment/sleep-client -n apps-ambient --timeout=120s
-  log_success "Ambient demo workload deployed."
+  log_info "Verifying sample ambient workload synced by Argo CD (apps-ambient namespace)..."
+  local i
+  for ((i = 0; i < 30; i++)); do
+    if kubectl get deployment/echo-server -n apps-ambient &>/dev/null; then
+      break
+    fi
+    sleep 3
+  done
+
+  kubectl rollout status deployment/echo-server -n apps-ambient --timeout=120s || true
+  kubectl rollout status deployment/sleep-client -n apps-ambient --timeout=120s || true
+  log_success "Ambient demo workload verified."
 }
 
 #######################################

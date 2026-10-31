@@ -11,19 +11,14 @@ gitops/
 ├── gke/                          # GKE Cluster & Platform Declarations
 │   ├── cluster-spec.yaml         # Declarative cluster definition & node specifications
 │   ├── namespaces.yaml           # Core cluster namespaces & ambient enablement labels
-│   └── network-policies.yaml     # Baseline cluster network policies
-├── istio/                        # Helm Values & Mesh Configurations
-│   ├── base/                     # Istio Base CRDs values
-│   ├── cni/                      # Istio CNI Plugin with Ambient Mode enabled for GKE
-│   ├── istiod/                   # Istiod Control Plane with Ambient profile
-│   ├── ztunnel/                  # Istio Ztunnel DaemonSet for L4 node proxy
-│   └── samples/                  # Sample microservices validating Ambient Mode
-└── argocd-apps/                  # Argo CD Application Manifests
-    ├── istio-base.yaml           # Wave 0: Base CRDs
-    ├── istio-cni.yaml            # Wave 1: CNI DaemonSet
-    ├── istiod.yaml               # Wave 1: Control Plane
-    └── istio-ztunnel.yaml        # Wave 2: Ztunnel DaemonSet
+│   ├── network-policies.yaml     # Baseline cluster network policies
+│   └── resource-quotas.yaml      # Critical resource quotas for GKE
+└── argocd-apps/                  # Argo CD Root Application Manifests
+    └── istio-ambient-root.yaml   # Syncs all Istio Ambient configurations from private repo
 ```
+
+> **Note**: All Istio Ambient Mode configurations (Helm charts, values, mesh policies, waypoint proxies, and ambient workloads) have been migrated to the dedicated private repository:
+> 👉 [**github.com/wilsonfv/istio-ambient-config**](https://github.com/wilsonfv/istio-ambient-config)
 
 ---
 

@@ -10,26 +10,20 @@ Automated scripts and declarative GitOps source-of-truth configurations followin
 .
 ├── install-argocd.sh          # Installs/configures latest Argo CD on GKE
 ├── install-crossplane.sh      # Installs latest Crossplane on GKE via Helm
-├── deploy-istio-ambient.sh    # Deploys Istio Ambient Mode via Argo CD Applications
+├── deploy-istio-ambient.sh    # Deploys Istio Ambient Mode via Argo CD from private repo
 ├── gitops/                    # GitOps Source of Truth
 │   ├── gke/                   # Declarative GKE infrastructure & platform configs
 │   │   ├── cluster-spec.yaml      # GKE Cluster definition & node configuration
 │   │   ├── namespaces.yaml        # Core namespaces & Ambient enablement
 │   │   ├── resource-quotas.yaml   # Critical pod resource quotas for GKE
 │   │   └── network-policies.yaml  # Internal cluster traffic security policies
-│   ├── istio/                 # Source of truth for Istio Ambient Mode Helm values
-│   │   ├── base/values.yaml       # Istio Base CRDs configuration
-│   │   ├── cni/values.yaml        # Istio CNI DaemonSet with GKE paths
-│   │   ├── istiod/values.yaml     # Istiod Control Plane with Ambient profile
-│   │   ├── ztunnel/values.yaml    # Istio Ztunnel node proxy DaemonSet
-│   │   └── samples/               # Ambient validation workloads (apps-ambient)
-│   └── argocd-apps/           # Argo CD Application Manifests
-│       ├── istio-base.yaml        # Wave 0: Istio Base CRDs
-│       ├── istio-cni.yaml         # Wave 1: Istio CNI Plugin
-│       ├── istiod.yaml            # Wave 1: Istiod Control Plane
-│       └── istio-ztunnel.yaml     # Wave 2: Istio Ztunnel L4 Proxy
+│   └── argocd-apps/           # Argo CD Root Application Manifests
+│       └── istio-ambient-root.yaml # Root Application syncing from private repo
 └── README.md
 ```
+
+> **Note**: Istio Ambient Mode configurations have been moved to the private GitOps repository:
+> 👉 [**github.com/wilsonfv/istio-ambient-config**](https://github.com/wilsonfv/istio-ambient-config)
 
 ---
 
