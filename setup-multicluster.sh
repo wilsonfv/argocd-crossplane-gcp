@@ -57,6 +57,8 @@ SERVICE_RANGE="${SERVICE_RANGE:-${DEFAULT_SERVICE_RANGE}}"
 MACHINE_TYPE="${MACHINE_TYPE:-${DEFAULT_MACHINE_TYPE}}"
 NUM_NODES="${NUM_NODES:-${DEFAULT_NUM_NODES}}"
 ARGOCD_NAMESPACE="${ARGOCD_NAMESPACE:-${DEFAULT_ARGOCD_NAMESPACE}}"
+DELETE_CLUSTERS="${DELETE_CLUSTERS:-false}"
+AUTO_APPROVE="${AUTO_APPROVE:-false}"
 
 #######################################
 # Print current timestamp in ISO format.
@@ -126,10 +128,12 @@ Options:
   --managed-subnet SUBNET      Managed subnet name (default: ${MANAGED_SUBNET})
   -m, --machine-type TYPE      GKE node machine type (default: ${MACHINE_TYPE})
   -n, --num-nodes NUM          Nodes per zone (default: ${NUM_NODES})
+  -d, --delete                 Delete both GKE clusters
+  -y, --yes                    Auto-approve deletion without interactive prompt
   -h, --help                   Show this help message
 
 Environment Variables:
-  PROJECT_ID, REGION, ZONE, VPC_NETWORK, CP_CLUSTER_NAME, MANAGED_CLUSTER_NAME
+  PROJECT_ID, REGION, ZONE, VPC_NETWORK, CP_CLUSTER_NAME, MANAGED_CLUSTER_NAME, DELETE_CLUSTERS, AUTO_APPROVE
 EOF
 }
 
@@ -174,6 +178,14 @@ parse_flags() {
       -n|--num-nodes)
         NUM_NODES="$2"
         shift 2
+        ;;
+      -d|--delete)
+        DELETE_CLUSTERS="true"
+        shift 1
+        ;;
+      -y|--yes)
+        AUTO_APPROVE="true"
+        shift 1
         ;;
       -h|--help)
         usage
@@ -419,11 +431,57 @@ print_summary() {
 }
 
 #######################################
+# Delete both GKE clusters.
+#######################################
+delete_clusters() {
+  local cp_loc_flag
+  cp_loc_flag="$(format_location_flag "${CP_LOCATION}")"
+  local managed_loc_flag
+  managed_loc_flag="$(format_location_flag "${MANAGED_LOCATION}")"
+
+  local confirm="${AUTO_APPROVE}"
+  if [[ "${confirm}" != "true" ]]; then
+    echo -e "${COLOR_YELLOW}[WARN]${COLOR_NC} You are about to permanently DELETE:"
+    echo "  - Control plane cluster: '${CP_CLUSTER_NAME}' in ${CP_LOCATION}"
+    echo "  - Managed cluster:       '${MANAGED_CLUSTER_NAME}' in ${MANAGED_LOCATION}"
+    echo -n "Are you sure you want to proceed? [y/N]: "
+    read -r confirm
+  fi
+
+  if [[ ! "${confirm}" =~ ^[Yy]$ && "${confirm}" != "true" ]]; then
+    log_info "Cluster deletion cancelled by user."
+    return 0
+  fi
+
+  if cluster_exists "${CP_CLUSTER_NAME}" "${CP_LOCATION}"; then
+    log_info "Deleting control plane cluster '${CP_CLUSTER_NAME}' (${CP_LOCATION})..."
+    gcloud container clusters delete "${CP_CLUSTER_NAME}" "${cp_loc_flag}" --project "${PROJECT_ID}" --quiet --async
+  fi
+
+  if cluster_exists "${MANAGED_CLUSTER_NAME}" "${MANAGED_LOCATION}"; then
+    log_info "Deleting managed cluster '${MANAGED_CLUSTER_NAME}' (${MANAGED_LOCATION})..."
+    gcloud container clusters delete "${MANAGED_CLUSTER_NAME}" "${managed_loc_flag}" --project "${PROJECT_ID}" --quiet --async
+  fi
+
+  log_info "Waiting for cluster deletions to complete..."
+  while cluster_exists "${CP_CLUSTER_NAME}" "${CP_LOCATION}" || cluster_exists "${MANAGED_CLUSTER_NAME}" "${MANAGED_LOCATION}"; do
+    sleep 10
+  done
+
+  log_success "All GKE clusters deleted successfully."
+}
+
+#######################################
 # Main execution function.
 #######################################
 main() {
   parse_flags "$@"
   check_prerequisites
+
+  if [[ "${DELETE_CLUSTERS}" == "true" ]]; then
+    delete_clusters
+    return 0
+  fi
 
   log_info "Phase 1: Ensuring GKE clusters exist..."
   launch_cluster_creation "${CP_CLUSTER_NAME}" "${CP_LOCATION}" "${CP_SUBNET}"

@@ -8,7 +8,7 @@ Automated scripts and declarative GitOps source-of-truth configurations followin
 
 ```text
 .
-├── install-argocd.sh          # Installs/configures latest Argo CD on GKE
+├── setup-multicluster.sh      # Provisions multi-cluster GKE & configures Argo CD control plane
 ├── install-crossplane.sh      # Installs latest Crossplane on GKE via Helm
 ├── deploy-istio-ambient.sh    # Deploys Istio Ambient Mode via Argo CD from private repo
 ├── gitops/                    # GitOps Source of Truth
@@ -25,33 +25,34 @@ Automated scripts and declarative GitOps source-of-truth configurations followin
 
 ---
 
-## 1. Deploy or Delete GKE Cluster & Argo CD
+## 1. Deploy or Delete Multi-Cluster GKE & Argo CD
 
 ```bash
-# Install / ensure cluster and deploy Argo CD
-./install-argocd.sh
+# Provision both GKE clusters, deploy Argo CD, and register managed cluster
+./setup-multicluster.sh
 
-# Delete the GKE cluster (with confirmation prompt)
-./install-argocd.sh --delete
+# Delete both GKE clusters (with confirmation prompt)
+./setup-multicluster.sh --delete
 
-# Delete the GKE cluster non-interactively
-./install-argocd.sh --delete --yes
+# Delete both GKE clusters non-interactively
+./setup-multicluster.sh --delete --yes
 ```
 
 ### Options
 | Option | Env Var | Default | Description |
 |---|---|---|---|
 | `-p`, `--project` | `PROJECT_ID` | `gcloud config list` | Target GCP Project ID (dynamically detected) |
-| `-c`, `--cluster` | `CLUSTER_NAME` | `argocd-cluster` | Target GKE cluster name |
-| `-r`, `--region` | `REGION` | `europe-west1` | GKE cluster region |
-| `-z`, `--zone` | `ZONE` | `""` | GKE cluster zone (optional) |
-| `-n`, `--namespace` | `NAMESPACE` | `argocd` | Kubernetes namespace for Argo CD |
-| `-e`, `--expose` | `EXPOSE_TYPE` | `ClusterIP` | Service type (`ClusterIP` or `LoadBalancer`) |
-| `--autopilot` | `AUTOPILOT` | `false` | Create cluster in Autopilot mode if creating new |
-| `-d`, `--delete` | `DELETE_CLUSTER` | `false` | Delete the specified GKE cluster |
-| `-y`, `--yes` | `AUTO_APPROVE` | `false` | Auto-approve cluster creation or deletion |
+| `-r`, `--region` | `REGION` | `europe-west1` | GCP region for clusters |
+| `--cp-cluster` | `CP_CLUSTER_NAME` | `argocd-control-plane` | Control plane GKE cluster name |
+| `--cp-subnet` | `CP_SUBNET` | `internal-vpc1-europe-west1-gke` | Control plane subnet |
+| `--managed-cluster`| `MANAGED_CLUSTER_NAME`| `gke-managed-cluster` | Managed GKE cluster name |
+| `--managed-subnet` | `MANAGED_SUBNET` | `internal-vpc1-europe-west1-gke2`| Managed cluster subnet |
+| `-m`, `--machine-type` | `MACHINE_TYPE` | `e2-standard-4` | Node machine type |
+| `-n`, `--num-nodes` | `NUM_NODES` | `1` | Nodes per zone |
+| `-d`, `--delete` | `DELETE_CLUSTERS` | `false` | Delete both GKE clusters |
+| `-y`, `--yes` | `AUTO_APPROVE` | `false` | Auto-approve deletion prompt |
 
-- Access UI: `kubectl port-forward svc/argocd-server -n argocd 8080:443` -> [https://localhost:8080](https://localhost:8080)
+- Access UI: `kubectl config use-context gke_mq-usecase-1_europe-west1_argocd-control-plane && kubectl port-forward svc/argocd-server -n argocd 8080:443` -> [https://localhost:8080](https://localhost:8080)
 - Username: `admin`
 - Password: `kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d && echo`
 
