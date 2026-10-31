@@ -12,7 +12,7 @@ set -o pipefail
 # -----------------------------------------------------------------------------
 # Global Constants and Defaults
 # -----------------------------------------------------------------------------
-readonly DEFAULT_CLUSTER_NAME="argocd-cluster"
+readonly DEFAULT_CLUSTER_NAME="argocd-control-plane"
 readonly DEFAULT_REGION="europe-west1"
 readonly DEFAULT_ZONE=""
 readonly DEFAULT_ARGOCD_NAMESPACE="argocd"
