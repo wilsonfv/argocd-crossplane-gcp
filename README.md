@@ -12,18 +12,16 @@ Automated scripts and declarative GitOps source-of-truth configurations followin
 ├── install-crossplane.sh      # Installs latest Crossplane on GKE via Helm
 ├── deploy-istio-ambient.sh    # Deploys Istio Ambient Mode via Argo CD from private repo
 ├── gitops/                    # GitOps Source of Truth
-│   ├── gke/                   # Declarative GKE infrastructure & platform configs
-│   │   ├── cluster-spec.yaml      # GKE Cluster definition & node configuration
-│   │   ├── namespaces.yaml        # Core namespaces & Ambient enablement
-│   │   ├── resource-quotas.yaml   # Critical pod resource quotas for GKE
-│   │   └── network-policies.yaml  # Internal cluster traffic security policies
-│   └── argocd-apps/           # Argo CD Root Application Manifests
-│       └── istio-ambient-root.yaml # Root Application syncing from private repo
+│   └── gke/                   # Declarative GKE infrastructure & platform configs
+│       ├── cluster-spec.yaml  # GKE Cluster definition & node configuration
+│       └── namespaces.yaml    # Platform namespaces (crossplane-system, argocd)
 └── README.md
 ```
 
-> **Note**: Istio Ambient Mode configurations have been moved to the private GitOps repository:
+> **Note**: All Istio Ambient Mode configurations reside exclusively in the private GitOps repository:
 > 👉 [**github.com/wilsonfv/istio-ambient-config**](https://github.com/wilsonfv/istio-ambient-config)
+>
+> This repository contains **no Istio configurations**; deployment syncs directly from the private repository.
 
 ---
 

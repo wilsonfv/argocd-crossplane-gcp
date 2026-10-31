@@ -17,8 +17,7 @@ readonly DEFAULT_REGION="europe-west1"
 readonly DEFAULT_ZONE=""
 readonly DEFAULT_ARGOCD_NAMESPACE="argocd"
 readonly DEFAULT_ISTIO_NAMESPACE="istio-system"
-readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-readonly GITOPS_DIR="${SCRIPT_DIR}/gitops"
+readonly DEFAULT_ISTIO_REPO_URL="https://github.com/wilsonfv/istio-ambient-config.git"
 
 # Terminal colors
 readonly COLOR_RED='\033[0;31m'
@@ -35,6 +34,7 @@ REGION="${REGION:-${DEFAULT_REGION}}"
 ZONE="${ZONE:-${DEFAULT_ZONE}}"
 ARGOCD_NAMESPACE="${ARGOCD_NAMESPACE:-${DEFAULT_ARGOCD_NAMESPACE}}"
 ISTIO_NAMESPACE="${ISTIO_NAMESPACE:-${DEFAULT_ISTIO_NAMESPACE}}"
+ISTIO_REPO_URL="${ISTIO_REPO_URL:-${DEFAULT_ISTIO_REPO_URL}}"
 GITHUB_TOKEN="${GITHUB_TOKEN:-}"
 
 #######################################
@@ -281,26 +281,14 @@ ensure_dns_zone() {
 }
 
 #######################################
-# Apply GKE baseline configurations (namespaces, policies).
-# Arguments:
-#   None.
-#######################################
-apply_gke_baseline() {
-  log_info "Applying GKE namespaces, quotas, and baseline configuration..."
-  kubectl apply -f "${GITOPS_DIR}/gke/namespaces.yaml"
-  kubectl apply -f "${GITOPS_DIR}/gke/resource-quotas.yaml"
-  kubectl apply -f "${GITOPS_DIR}/gke/network-policies.yaml"
-}
-
-#######################################
 # Configure Argo CD repository Secret for private GitHub repo.
 # Globals:
-#   ARGOCD_NAMESPACE, GITHUB_TOKEN
+#   ARGOCD_NAMESPACE, GITHUB_TOKEN, ISTIO_REPO_URL
 # Arguments:
 #   None.
 #######################################
 ensure_argocd_repo_secret() {
-  log_info "Verifying Argo CD credentials for private repository https://github.com/wilsonfv/istio-ambient-config.git..."
+  log_info "Verifying Argo CD credentials for private repository ${ISTIO_REPO_URL}..."
   local secret_name="repo-istio-ambient-config"
   local token="${GITHUB_TOKEN:-}"
 
@@ -316,7 +304,7 @@ ensure_argocd_repo_secret() {
     kubectl create secret generic "${secret_name}" \
       --namespace="${ARGOCD_NAMESPACE}" \
       --from-literal=type="git" \
-      --from-literal=url="https://github.com/wilsonfv/istio-ambient-config.git" \
+      --from-literal=url="${ISTIO_REPO_URL}" \
       --from-literal=username="wilsonfv" \
       --from-literal=password="${token}" \
       --dry-run=client -o yaml | \
@@ -330,18 +318,41 @@ ensure_argocd_repo_secret() {
 }
 
 #######################################
-# Deploy Argo CD Applications for Istio Ambient Mode.
+# Deploy Argo CD Root Application syncing exclusively from private repo.
 # Globals:
-#   ARGOCD_NAMESPACE, GITOPS_DIR
+#   ARGOCD_NAMESPACE, ISTIO_REPO_URL
 # Arguments:
 #   None.
 #######################################
 deploy_argocd_apps() {
-  log_info "Deploying Istio Ambient Mode root application to sync from private repo..."
+  log_info "Deploying Argo CD Root Application to sync Istio config from ${ISTIO_REPO_URL}..."
 
-  local root_app="${GITOPS_DIR}/argocd-apps/istio-ambient-root.yaml"
-  log_info "Applying Argo CD Root Application: $(basename "${root_app}")..."
-  kubectl apply -n "${ARGOCD_NAMESPACE}" -f "${root_app}"
+  cat <<EOF | kubectl apply -n "${ARGOCD_NAMESPACE}" -f -
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: istio-ambient-root
+  namespace: ${ARGOCD_NAMESPACE}
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: ${ISTIO_REPO_URL}
+    targetRevision: HEAD
+    path: argocd/apps
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: ${ARGOCD_NAMESPACE}
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+EOF
+  log_success "Argo CD Root Application applied. Istio Ambient Mode is syncing from ${ISTIO_REPO_URL}."
 }
 
 #######################################
@@ -433,7 +444,6 @@ main() {
   check_prerequisites
   connect_cluster
   ensure_dns_zone
-  apply_gke_baseline
   ensure_argocd_repo_secret
   deploy_argocd_apps
   wait_for_rollouts
