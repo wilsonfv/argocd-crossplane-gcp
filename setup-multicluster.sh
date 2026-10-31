@@ -2,7 +2,7 @@
 #
 # Multi-Cluster GKE Setup with Centralized Argo CD Control Plane.
 #
-# Creates two GKE clusters in VPC 'mq-usecase-1-internal-vpc1':
+# Creates two GKE clusters in VPC with internal subnets:
 # 1. First GKE (Argo CD control plane) in subnet 'internal-vpc1-europe-west1-gke'
 # 2. Second GKE (managed cluster) in subnet 'internal-vpc1-europe-west1-gke2'
 # 3. Installs Argo CD on the first GKE cluster
@@ -20,7 +20,7 @@ set -o pipefail
 # -----------------------------------------------------------------------------
 readonly DEFAULT_REGION="europe-west1"
 readonly DEFAULT_ZONE=""
-readonly DEFAULT_VPC="mq-usecase-1-internal-vpc1"
+readonly DEFAULT_VPC=""
 readonly DEFAULT_CP_CLUSTER_NAME="argocd-control-plane"
 readonly DEFAULT_CP_LOCATION="europe-west1"
 readonly DEFAULT_CP_SUBNET="internal-vpc1-europe-west1-gke"
@@ -119,9 +119,10 @@ Sets up a Multi-Cluster GKE environment with Argo CD control plane:
   - Both clusters attach to VPC '${VPC_NETWORK}'
 
 Options:
-  -p, --project PROJECT_ID     GCP Project ID (default: ${display_project})
+  -p, --project PROJECT_ID     GCP Project ID (default: read from 'gcloud config list' -> ${display_project})
   -r, --region REGION          GCP Region (default: ${REGION})
   -z, --zone ZONE              GCP Zone (optional, overrides region for zonal clusters)
+  --network NETWORK            VPC network name (default: auto-detected from project)
   --cp-cluster NAME            Control plane cluster name (default: ${CP_CLUSTER_NAME})
   --cp-subnet SUBNET           Control plane subnet name (default: ${CP_SUBNET})
   --managed-cluster NAME       Managed cluster name (default: ${MANAGED_CLUSTER_NAME})
@@ -153,6 +154,10 @@ parse_flags() {
         ;;
       -z|--zone)
         ZONE="$2"
+        shift 2
+        ;;
+      --network)
+        VPC_NETWORK="$2"
         shift 2
         ;;
       --cp-cluster)
@@ -214,15 +219,36 @@ check_prerequisites() {
   done
 
   if [[ -z "${PROJECT_ID}" ]]; then
+    log_info "Fetching active GCP project ID from 'gcloud config list'..."
     PROJECT_ID="$(get_gcloud_config_project)"
   fi
 
   if [[ -z "${PROJECT_ID}" ]]; then
-    log_error "No active GCP project found. Please provide via -p/--project or 'gcloud config set project'."
+    log_error "No active GCP project found in 'gcloud config list'. Please provide via -p/--project or run 'gcloud config set project <PROJECT_ID>'."
     return 1
   fi
   log_info "Target GCP Project: ${PROJECT_ID}"
   gcloud config set project "${PROJECT_ID}" >/dev/null
+}
+
+#######################################
+# Resolve VPC network dynamically if not provided.
+#######################################
+resolve_network() {
+  if [[ -n "${VPC_NETWORK}" ]]; then
+    return 0
+  fi
+
+  log_info "Resolving VPC Network from GCP project '${PROJECT_ID}'..."
+  local detected_vpc
+  detected_vpc="$(gcloud compute networks list --project="${PROJECT_ID}" --filter="name ~ internal-vpc1" --format="value(name)" --limit=1 2>/dev/null || true)"
+  if [[ -n "${detected_vpc}" ]]; then
+    VPC_NETWORK="${detected_vpc}"
+    log_info "Discovered VPC Network: ${VPC_NETWORK}"
+  else
+    VPC_NETWORK="${PROJECT_ID}-internal-vpc1"
+    log_info "Defaulting to inferred VPC Network: ${VPC_NETWORK}"
+  fi
 }
 
 #######################################
@@ -477,6 +503,7 @@ delete_clusters() {
 main() {
   parse_flags "$@"
   check_prerequisites
+  resolve_network
 
   if [[ "${DELETE_CLUSTERS}" == "true" ]]; then
     delete_clusters

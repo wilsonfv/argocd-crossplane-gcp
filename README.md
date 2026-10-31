@@ -52,7 +52,7 @@ Automated scripts and declarative GitOps source-of-truth configurations followin
 | `-d`, `--delete` | `DELETE_CLUSTERS` | `false` | Delete both GKE clusters |
 | `-y`, `--yes` | `AUTO_APPROVE` | `false` | Auto-approve deletion prompt |
 
-- Access UI: `kubectl config use-context gke_mq-usecase-1_europe-west1_argocd-control-plane && kubectl port-forward svc/argocd-server -n argocd 8080:443` -> [https://localhost:8080](https://localhost:8080)
+- Access UI: `kubectl config use-context gke_${PROJECT_ID}_europe-west1_argocd-control-plane && kubectl port-forward svc/argocd-server -n argocd 8080:443` -> [https://localhost:8080](https://localhost:8080)
 - Username: `admin`
 - Password: `kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d && echo`
 
