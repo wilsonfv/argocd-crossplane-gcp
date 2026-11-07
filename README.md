@@ -67,7 +67,7 @@ Automated scripts and declarative GitOps source-of-truth configurations followin
 
 ---
 
-## 3. Deploy Istio Service Mesh (Ambient Mode) via Argo CD
+## 3. Deploy Istio Service Mesh (Ambient Mode) to Multi-Cluster GKE via Argo CD
 
 Istio Ambient Mode configurations are synchronized from the dedicated private GitOps repository:
 👉 [**github.com/wilsonfv/istio-ambient-config**](https://github.com/wilsonfv/istio-ambient-config) (Private)
@@ -76,8 +76,9 @@ Istio Ambient Mode provides a transparent, sidecarless service mesh architecture
 - **Ztunnel (Zero-Trust Tunnel)**: Node-level DaemonSet handling mTLS and L4 authorization without injecting sidecars into application pods.
 - **Istio CNI**: Redirects application traffic to node-local `ztunnel` instances (configured for GKE paths `/home/kubernetes/bin` and `/etc/cni/net.d`).
 - **Istiod**: Central control plane operating with `profile: ambient`.
+- **Waypoint Proxy**: Envoy L7 gateway dynamically instantiated for L7 routing and authorization policies.
 
-To deploy via Argo CD:
+To deploy Istio Ambient mesh to both the control plane cluster and the managed cluster:
 ```bash
 ./deploy-istio-ambient.sh
 ```
@@ -93,20 +94,36 @@ kubectl get applications.argoproj.io -n argocd
 ```
 Output:
 ```text
-NAME            SYNC STATUS   HEALTH STATUS
-istio-base      Synced        Healthy
-istio-cni       Synced        Healthy
-istio-ztunnel   Synced        Healthy
-istiod          Synced        Healthy
+NAME                         SYNC STATUS   HEALTH STATUS
+ambient-samples              Synced        Healthy
+ambient-samples-managed      Synced        Healthy
+istio-ambient-root           Synced        Healthy
+istio-ambient-root-managed   Synced        Healthy
+istio-base                   Synced        Healthy
+istio-base-managed           Synced        Healthy
+istio-cni                    Synced        Healthy
+istio-cni-managed            Synced        Healthy
+istio-policies               Synced        Healthy
+istio-policies-managed       Synced        Healthy
+istio-ztunnel                Synced        Healthy
+istio-ztunnel-managed        Synced        Healthy
+istiod                       Synced        Healthy
+istiod-managed               Synced        Healthy
 ```
 
 ### Validate Ambient Mode Traffic
 Workloads in the `apps-ambient` namespace have the label `istio.io/dataplane-mode: ambient`.
-Send a test HTTP request from the sleep client to the echo server:
+
+Send a test HTTP request from the sleep client to the echo server on each cluster:
 ```bash
-kubectl exec -n apps-ambient deployment/sleep-client -- curl -s http://echo-server:80
+# Control plane cluster:
+kubectl --context gke_${PROJECT_ID}_europe-west1_argocd-control-plane exec -n apps-ambient deployment/sleep-client -- curl -s http://echo-server/
+
+# Managed cluster:
+kubectl --context gke_${PROJECT_ID}_europe-west1-b_gke-managed-cluster exec -n apps-ambient deployment/sleep-client -- curl -s http://echo-server/
 ```
+
 Inspect `ztunnel` logs to verify transparent mTLS proxying:
 ```bash
-kubectl logs -n istio-system daemonset/ztunnel -c istio-proxy --tail=20
+kubectl logs -n istio-system -l app=ztunnel --tail=20
 ```

@@ -409,7 +409,8 @@ register_managed_cluster() {
     --kube-context "${cp_context}" \
     --core \
     --yes \
-    --upsert
+    --upsert \
+    --loglevel debug
 
   log_success "Managed cluster '${MANAGED_CLUSTER_NAME}' successfully registered into Argo CD."
 }
@@ -447,7 +448,7 @@ print_summary() {
   echo -e "  - Managed By:              ${CP_CLUSTER_NAME} (Argo CD)"
   echo ""
   echo -e "${COLOR_BOLD}Argo CD Managed Clusters:${COLOR_NC}"
-  argocd cluster list --core --kube-context "${cp_context}" 2>/dev/null || true
+  argocd cluster list --core --kube-context "${cp_context}" --loglevel debug || true
   echo ""
   echo -e "${COLOR_BOLD}Access Argo CD UI:${COLOR_NC}"
   echo "  kubectl config use-context ${cp_context}"

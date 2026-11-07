@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 #
-# Deploy Istio Service Mesh (Ambient Mode) to GKE using Argo CD.
+# Deploy Istio Service Mesh (Ambient Mode) to Multi-Cluster GKE using Argo CD.
+# Deploys to both:
+# 1. Control Plane Cluster (argocd-control-plane)
+# 2. Managed Cluster (gke-managed-cluster)
 #
 # Style Guide: Google Shell Style Guide
 # https://google.github.io/styleguide/shellguide.html
@@ -12,9 +15,10 @@ set -o pipefail
 # -----------------------------------------------------------------------------
 # Global Constants and Defaults
 # -----------------------------------------------------------------------------
-readonly DEFAULT_CLUSTER_NAME="argocd-control-plane"
-readonly DEFAULT_REGION="europe-west1"
-readonly DEFAULT_ZONE=""
+readonly DEFAULT_CP_CLUSTER_NAME="argocd-control-plane"
+readonly DEFAULT_CP_LOCATION="europe-west1"
+readonly DEFAULT_MANAGED_CLUSTER_NAME="gke-managed-cluster"
+readonly DEFAULT_MANAGED_LOCATION="europe-west1-b"
 readonly DEFAULT_ARGOCD_NAMESPACE="argocd"
 readonly DEFAULT_ISTIO_NAMESPACE="istio-system"
 readonly DEFAULT_ISTIO_REPO_URL="https://github.com/wilsonfv/istio-ambient-config.git"
@@ -29,9 +33,10 @@ readonly COLOR_NC='\033[0m'
 
 # Mutable runtime variables
 PROJECT_ID="${PROJECT_ID:-}"
-CLUSTER_NAME="${CLUSTER_NAME:-${DEFAULT_CLUSTER_NAME}}"
-REGION="${REGION:-${DEFAULT_REGION}}"
-ZONE="${ZONE:-${DEFAULT_ZONE}}"
+CP_CLUSTER_NAME="${CP_CLUSTER_NAME:-${DEFAULT_CP_CLUSTER_NAME}}"
+CP_LOCATION="${CP_LOCATION:-${DEFAULT_CP_LOCATION}}"
+MANAGED_CLUSTER_NAME="${MANAGED_CLUSTER_NAME:-${DEFAULT_MANAGED_CLUSTER_NAME}}"
+MANAGED_LOCATION="${MANAGED_LOCATION:-${DEFAULT_MANAGED_LOCATION}}"
 ARGOCD_NAMESPACE="${ARGOCD_NAMESPACE:-${DEFAULT_ARGOCD_NAMESPACE}}"
 ISTIO_NAMESPACE="${ISTIO_NAMESPACE:-${DEFAULT_ISTIO_NAMESPACE}}"
 ISTIO_REPO_URL="${ISTIO_REPO_URL:-${DEFAULT_ISTIO_REPO_URL}}"
@@ -92,6 +97,20 @@ get_gcloud_config_project() {
 }
 
 #######################################
+# Format location string to corresponding gcloud flag.
+# Arguments:
+#   Location string (e.g. europe-west1 or europe-west1-b)
+#######################################
+format_location_flag() {
+  local location="$1"
+  if [[ "${location}" =~ -[a-z]$ ]]; then
+    echo "--zone=${location}"
+  else
+    echo "--region=${location}"
+  fi
+}
+
+#######################################
 # Display help and usage instructions.
 # Arguments:
 #   None.
@@ -104,25 +123,30 @@ usage() {
   cat <<EOF
 Usage: $(basename "$0") [OPTIONS]
 
-Deploys Istio Ambient Mode to GKE via Argo CD GitOps manifests.
+Deploys Istio Ambient Mode to Multi-Cluster GKE via Argo CD GitOps manifests:
+  - Control Plane Cluster: '${CP_CLUSTER_NAME}' in '${CP_LOCATION}'
+  - Managed Cluster:       '${MANAGED_CLUSTER_NAME}' in '${MANAGED_LOCATION}'
 
 Options:
-  -p, --project PROJECT_ID     GCP Project ID (default: read from 'gcloud config list' -> ${display_project})
-  -c, --cluster CLUSTER_NAME   GKE Cluster name (default: ${CLUSTER_NAME})
-  -r, --region REGION          GCP Region (default: ${REGION})
-  -z, --zone ZONE              GCP Zone (optional, overrides region for zonal clusters)
-  -t, --token TOKEN            GitHub PAT Token for private repository access
-  -h, --help                   Show this help message
+  -p, --project PROJECT_ID          GCP Project ID (default: read from 'gcloud config list' -> ${display_project})
+  --cp-cluster NAME                 Control plane cluster name (default: ${CP_CLUSTER_NAME})
+  --cp-location LOCATION            Control plane cluster location (default: ${CP_LOCATION})
+  --managed-cluster NAME            Managed cluster name (default: ${MANAGED_CLUSTER_NAME})
+  --managed-location LOCATION       Managed cluster location (default: ${MANAGED_LOCATION})
+  -c, --cluster CLUSTER_NAME        Alias for --cp-cluster
+  -r, --region REGION               Alias for --cp-location
+  -z, --zone ZONE                   Overrides --cp-location for zonal clusters
+  -t, --token TOKEN                 GitHub PAT Token for private repository access
+  -h, --help                        Show this help message
 
 Environment Variables:
-  PROJECT_ID, CLUSTER_NAME, REGION, ZONE, ARGOCD_NAMESPACE, ISTIO_NAMESPACE, GITHUB_TOKEN
+  PROJECT_ID, CP_CLUSTER_NAME, CP_LOCATION, MANAGED_CLUSTER_NAME, MANAGED_LOCATION,
+  ARGOCD_NAMESPACE, ISTIO_NAMESPACE, GITHUB_TOKEN
 EOF
 }
 
 #######################################
 # Parse command line flags.
-# Globals:
-#   PROJECT_ID, CLUSTER_NAME, REGION, ZONE, GITHUB_TOKEN
 # Arguments:
 #   Command line arguments.
 #######################################
@@ -133,16 +157,32 @@ parse_flags() {
         PROJECT_ID="$2"
         shift 2
         ;;
+      --cp-cluster)
+        CP_CLUSTER_NAME="$2"
+        shift 2
+        ;;
+      --cp-location)
+        CP_LOCATION="$2"
+        shift 2
+        ;;
+      --managed-cluster)
+        MANAGED_CLUSTER_NAME="$2"
+        shift 2
+        ;;
+      --managed-location)
+        MANAGED_LOCATION="$2"
+        shift 2
+        ;;
       -c|--cluster)
-        CLUSTER_NAME="$2"
+        CP_CLUSTER_NAME="$2"
         shift 2
         ;;
       -r|--region)
-        REGION="$2"
+        CP_LOCATION="$2"
         shift 2
         ;;
       -z|--zone)
-        ZONE="$2"
+        CP_LOCATION="$2"
         shift 2
         ;;
       -t|--token)
@@ -164,10 +204,6 @@ parse_flags() {
 
 #######################################
 # Resolve GCP Project ID using gcloud config list, env, or flags.
-# Globals:
-#   PROJECT_ID
-# Arguments:
-#   None.
 # Returns:
 #   0 on success, 1 on failure.
 #######################################
@@ -194,8 +230,6 @@ resolve_project_id() {
 
 #######################################
 # Verify required dependencies and active authentication.
-# Arguments:
-#   None.
 # Returns:
 #   0 if all checks pass, 1 otherwise.
 #######################################
@@ -221,41 +255,35 @@ check_prerequisites() {
 }
 
 #######################################
-# Connect to target GKE cluster.
-# Globals:
-#   PROJECT_ID, CLUSTER_NAME, REGION, ZONE
-# Arguments:
-#   None.
+# Connect to both GKE clusters and verify credentials.
 # Returns:
 #   0 on success, non-zero on failure.
 #######################################
-connect_cluster() {
-  local -a location_flags=()
-  local location_desc=""
+connect_clusters() {
+  local cp_loc_flag
+  cp_loc_flag="$(format_location_flag "${CP_LOCATION}")"
+  local managed_loc_flag
+  managed_loc_flag="$(format_location_flag "${MANAGED_LOCATION}")"
 
-  if [[ -n "${ZONE}" ]]; then
-    location_flags=(--zone="${ZONE}")
-    location_desc="zone: ${ZONE}"
-  else
-    location_flags=(--region="${REGION}")
-    location_desc="region: ${REGION}"
-  fi
-
-  log_info "Connecting to GKE cluster '${CLUSTER_NAME}' in ${location_desc}..."
-
-  if ! gcloud container clusters describe "${CLUSTER_NAME}" "${location_flags[@]}" --project "${PROJECT_ID}" &>/dev/null; then
-    log_error "Cluster '${CLUSTER_NAME}' not found in project ${PROJECT_ID} (${location_desc})."
+  log_info "Connecting to Control Plane GKE cluster '${CP_CLUSTER_NAME}' (${CP_LOCATION})..."
+  if ! gcloud container clusters describe "${CP_CLUSTER_NAME}" "${cp_loc_flag}" --project "${PROJECT_ID}" &>/dev/null; then
+    log_error "Control plane cluster '${CP_CLUSTER_NAME}' not found in project ${PROJECT_ID} (${CP_LOCATION})."
     return 1
   fi
+  gcloud container clusters get-credentials "${CP_CLUSTER_NAME}" "${cp_loc_flag}" --project "${PROJECT_ID}"
+  log_success "Connected to control plane cluster '${CP_CLUSTER_NAME}'."
 
-  gcloud container clusters get-credentials "${CLUSTER_NAME}" "${location_flags[@]}" --project "${PROJECT_ID}"
-  log_success "Connected to cluster '${CLUSTER_NAME}'."
+  log_info "Connecting to Managed GKE cluster '${MANAGED_CLUSTER_NAME}' (${MANAGED_LOCATION})..."
+  if ! gcloud container clusters describe "${MANAGED_CLUSTER_NAME}" "${managed_loc_flag}" --project "${PROJECT_ID}" &>/dev/null; then
+    log_error "Managed cluster '${MANAGED_CLUSTER_NAME}' not found in project ${PROJECT_ID} (${MANAGED_LOCATION})."
+    return 1
+  fi
+  gcloud container clusters get-credentials "${MANAGED_CLUSTER_NAME}" "${managed_loc_flag}" --project "${PROJECT_ID}"
+  log_success "Connected to managed cluster '${MANAGED_CLUSTER_NAME}'."
 }
 
 #######################################
 # Ensure Cloud DNS private forwarding zone exists for istio.io.
-# Arguments:
-#   None.
 #######################################
 ensure_dns_zone() {
   log_info "Verifying Cloud DNS zone for istio.io registry access..."
@@ -281,13 +309,25 @@ ensure_dns_zone() {
 }
 
 #######################################
-# Configure Argo CD repository Secret for private GitHub repo.
-# Globals:
-#   ARGOCD_NAMESPACE, GITHUB_TOKEN, ISTIO_REPO_URL
+# Ensure Kubernetes Gateway API CRDs exist on a cluster.
 # Arguments:
-#   None.
+#   Cluster context
+#   Cluster label
+#######################################
+ensure_gateway_api_crds() {
+  local context="$1"
+  local cluster_name="$2"
+
+  log_info "[${cluster_name}] Ensuring Kubernetes Gateway API CRDs..."
+  kubectl --context="${context}" apply -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.2.0/standard-install.yaml >/dev/null
+  log_success "[${cluster_name}] Gateway API CRDs installed."
+}
+
+#######################################
+# Configure Argo CD repository Secret for private GitHub repo.
 #######################################
 ensure_argocd_repo_secret() {
+  local cp_context="gke_${PROJECT_ID}_${CP_LOCATION}_${CP_CLUSTER_NAME}"
   log_info "Verifying Argo CD credentials for private repository ${ISTIO_REPO_URL}..."
   local secret_name="repo-istio-ambient-config"
   local token="${GITHUB_TOKEN:-}"
@@ -301,15 +341,15 @@ ensure_argocd_repo_secret() {
   fi
 
   if [[ -n "${token}" ]]; then
-    kubectl create secret generic "${secret_name}" \
+    kubectl --context="${cp_context}" create secret generic "${secret_name}" \
       --namespace="${ARGOCD_NAMESPACE}" \
       --from-literal=type="git" \
       --from-literal=url="${ISTIO_REPO_URL}" \
-      --from-literal=username="wilsonfv" \
+      --from-literal=username="oauth2" \
       --from-literal=password="${token}" \
       --dry-run=client -o yaml | \
-      kubectl label --local -f - "argocd.argoproj.io/secret-type=repository" -o yaml | \
-      kubectl apply -f -
+      kubectl --context="${cp_context}" label --local -f - "argocd.argoproj.io/secret-type=repository" -o yaml | \
+      kubectl --context="${cp_context}" apply -f -
     log_success "Argo CD repository secret '${secret_name}' configured."
   else
     log_warn "GITHUB_TOKEN not detected; skipping automatic repository secret creation."
@@ -318,16 +358,13 @@ ensure_argocd_repo_secret() {
 }
 
 #######################################
-# Deploy Argo CD Root Application syncing exclusively from private repo.
-# Globals:
-#   ARGOCD_NAMESPACE, ISTIO_REPO_URL
-# Arguments:
-#   None.
+# Deploy Argo CD Root Applications for both clusters.
 #######################################
 deploy_argocd_apps() {
-  log_info "Deploying Argo CD Root Application to sync Istio config from ${ISTIO_REPO_URL}..."
+  local cp_context="gke_${PROJECT_ID}_${CP_LOCATION}_${CP_CLUSTER_NAME}"
 
-  cat <<EOF | kubectl apply -n "${ARGOCD_NAMESPACE}" -f -
+  log_info "Deploying Argo CD Root Application for Control Plane cluster..."
+  cat <<EOF | kubectl --context="${cp_context}" apply -n "${ARGOCD_NAMESPACE}" -f -
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -352,85 +389,151 @@ spec:
       - CreateNamespace=true
       - ServerSideApply=true
 EOF
-  log_success "Argo CD Root Application applied. Istio Ambient Mode is syncing from ${ISTIO_REPO_URL}."
+  log_success "Argo CD Root Application 'istio-ambient-root' applied for Control Plane."
+
+  log_info "Deploying Argo CD Root Application for Managed cluster '${MANAGED_CLUSTER_NAME}'..."
+  cat <<EOF | kubectl --context="${cp_context}" apply -n "${ARGOCD_NAMESPACE}" -f -
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: istio-ambient-root-managed
+  namespace: ${ARGOCD_NAMESPACE}
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: ${ISTIO_REPO_URL}
+    targetRevision: HEAD
+    path: argocd/apps-managed
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: ${ARGOCD_NAMESPACE}
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+EOF
+  log_success "Argo CD Root Application 'istio-ambient-root-managed' applied for Managed cluster."
 }
 
 #######################################
-# Wait for Istio Ambient Mode components to be fully rolled out.
-# Globals:
-#   ISTIO_NAMESPACE
+# Wait for Istio Ambient Mode components to roll out on a cluster.
 # Arguments:
-#   None.
+#   Cluster context
+#   Cluster name
 #######################################
-wait_for_rollouts() {
-  log_info "Waiting for Argo CD to sync and roll out Istio components..."
+wait_for_rollouts_cluster() {
+  local ctx="$1"
+  local name="$2"
+
+  log_info "[${name}] Waiting for Argo CD to sync and roll out Istio components..."
   local i
-  for ((i = 0; i < 30; i++)); do
-    if kubectl get deployment/istiod -n "${ISTIO_NAMESPACE}" &>/dev/null; then
+  for ((i = 0; i < 40; i++)); do
+    if kubectl --context="${ctx}" get deployment/istiod -n "${ISTIO_NAMESPACE}" &>/dev/null; then
       break
     fi
     sleep 3
   done
 
-  log_info "Waiting for Istio CRDs and Control Plane to reconcile..."
-  kubectl rollout status deployment/istiod -n "${ISTIO_NAMESPACE}" --timeout=300s
+  log_info "[${name}] Waiting for Istiod Control Plane to reconcile..."
+  kubectl --context="${ctx}" rollout status deployment/istiod -n "${ISTIO_NAMESPACE}" --timeout=300s
 
-  log_info "Waiting for Istio CNI Node DaemonSet on GKE..."
-  kubectl rollout status daemonset/istio-cni-node -n "${ISTIO_NAMESPACE}" --timeout=300s
+  log_info "[${name}] Waiting for Istio CNI Node DaemonSet on GKE..."
+  kubectl --context="${ctx}" rollout status daemonset/istio-cni-node -n "${ISTIO_NAMESPACE}" --timeout=300s
 
-  log_info "Waiting for Istio Ztunnel (Ambient Proxy) DaemonSet..."
-  kubectl rollout status daemonset/ztunnel -n "${ISTIO_NAMESPACE}" --timeout=300s
+  log_info "[${name}] Waiting for Istio Ztunnel (Ambient Proxy) DaemonSet..."
+  kubectl --context="${ctx}" rollout status daemonset/ztunnel -n "${ISTIO_NAMESPACE}" --timeout=300s
 
-  log_success "All Istio Ambient components are healthy and running."
+  log_success "[${name}] All Istio Ambient components are healthy and running."
 }
 
 #######################################
-# Deploy sample workload to validate Ambient mesh.
+# Wait for sample workload to roll out on a cluster.
 # Arguments:
-#   None.
+#   Cluster context
+#   Cluster name
 #######################################
-deploy_sample_workload() {
-  log_info "Verifying sample ambient workload synced by Argo CD (apps-ambient namespace)..."
+wait_for_sample_workload() {
+  local ctx="$1"
+  local name="$2"
+
+  log_info "[${name}] Waiting for sample ambient workload in apps-ambient namespace..."
   local i
-  for ((i = 0; i < 30; i++)); do
-    if kubectl get deployment/echo-server -n apps-ambient &>/dev/null; then
+  for ((i = 0; i < 40; i++)); do
+    if kubectl --context="${ctx}" get deployment/echo-server -n apps-ambient &>/dev/null; then
       break
     fi
     sleep 3
   done
 
-  kubectl rollout status deployment/echo-server -n apps-ambient --timeout=120s || true
-  kubectl rollout status deployment/sleep-client -n apps-ambient --timeout=120s || true
-  log_success "Ambient demo workload verified."
+  kubectl --context="${ctx}" rollout status deployment/echo-server -n apps-ambient --timeout=120s || true
+  kubectl --context="${ctx}" rollout status deployment/sleep-client -n apps-ambient --timeout=120s || true
+  kubectl --context="${ctx}" rollout status deployment/namespace-waypoint -n apps-ambient --timeout=120s || true
+  log_success "[${name}] Ambient demo workload verified."
+}
+
+#######################################
+# Test transparent mTLS & L7 ambient traffic on a cluster.
+# Arguments:
+#   Cluster context
+#   Cluster name
+#######################################
+validate_ambient_traffic() {
+  local ctx="$1"
+  local name="$2"
+
+  log_info "[${name}] Validating ambient traffic (sleep-client -> echo-server)..."
+  local response
+  response="$(kubectl --context="${ctx}" exec -n apps-ambient deployment/sleep-client -- curl -s http://echo-server/ || true)"
+  if [[ -n "${response}" ]]; then
+    log_success "[${name}] Ambient traffic validated successfully: ${response}"
+  else
+    log_warn "[${name}] Ambient curl test returned no response; retry manually once pods settle."
+  fi
 }
 
 #######################################
 # Print final deployment summary.
-# Arguments:
-#   None.
 #######################################
 print_summary() {
+  local cp_context="gke_${PROJECT_ID}_${CP_LOCATION}_${CP_CLUSTER_NAME}"
+  local managed_context="gke_${PROJECT_ID}_${MANAGED_LOCATION}_${MANAGED_CLUSTER_NAME}"
+
   echo ""
   echo -e "${COLOR_GREEN}=====================================================================${COLOR_NC}"
-  echo -e "${COLOR_GREEN}       Istio Service Mesh (Ambient Mode) Deployed via Argo CD        ${COLOR_NC}"
+  echo -e "${COLOR_GREEN}   Multi-Cluster Istio Ambient Mode Deployed via Argo CD Complete    ${COLOR_NC}"
   echo -e "${COLOR_GREEN}=====================================================================${COLOR_NC}"
-  echo -e "${COLOR_BOLD}GCP Project:${COLOR_NC}       ${PROJECT_ID}"
-  echo -e "${COLOR_BOLD}GKE Cluster:${COLOR_NC}       ${CLUSTER_NAME}"
-  echo -e "${COLOR_BOLD}Istio Namespace:${COLOR_NC}   ${ISTIO_NAMESPACE}"
-  echo -e "${COLOR_BOLD}Argo CD Namespace:${COLOR_NC} ${ARGOCD_NAMESPACE}"
+  echo -e "${COLOR_BOLD}GCP Project:${COLOR_NC}                  ${PROJECT_ID}"
+  echo -e "${COLOR_BOLD}Istio Namespace:${COLOR_NC}              ${ISTIO_NAMESPACE}"
+  echo -e "${COLOR_BOLD}Argo CD Namespace:${COLOR_NC}            ${ARGOCD_NAMESPACE}"
   echo ""
-  echo -e "${COLOR_BOLD}Components in istio-system:${COLOR_NC}"
-  kubectl get pods -n "${ISTIO_NAMESPACE}" -o wide
-  echo ""
-  echo -e "${COLOR_BOLD}Ambient Test Workload (apps-ambient):${COLOR_NC}"
-  kubectl get pods -n apps-ambient
-  echo ""
-  echo -e "${COLOR_BOLD}Testing Ambient Traffic (mTLS without sidecars):${COLOR_NC}"
-  echo "  Run a curl request from the sleep client inside apps-ambient:"
-  echo -e "  ${COLOR_BLUE}kubectl exec -n apps-ambient deployment/sleep-client -- curl -s http://echo-server:8080${COLOR_NC}"
+  echo -e "${COLOR_BOLD}Cluster 1 (Control Plane):${COLOR_NC}    ${CP_CLUSTER_NAME} (${CP_LOCATION})"
+  echo -e "${COLOR_BOLD}Cluster 2 (Managed):${COLOR_NC}          ${MANAGED_CLUSTER_NAME} (${MANAGED_LOCATION})"
   echo ""
   echo -e "${COLOR_BOLD}Argo CD Applications Status:${COLOR_NC}"
-  kubectl get applications.argoproj.io -n "${ARGOCD_NAMESPACE}"
+  kubectl --context="${cp_context}" get applications.argoproj.io -n "${ARGOCD_NAMESPACE}"
+  echo ""
+  echo -e "${COLOR_BOLD}[Cluster 1: ${CP_CLUSTER_NAME}] istio-system Pods:${COLOR_NC}"
+  kubectl --context="${cp_context}" get pods -n "${ISTIO_NAMESPACE}" -o wide
+  echo ""
+  echo -e "${COLOR_BOLD}[Cluster 1: ${CP_CLUSTER_NAME}] apps-ambient Pods:${COLOR_NC}"
+  kubectl --context="${cp_context}" get pods -n apps-ambient -o wide
+  echo ""
+  echo -e "${COLOR_BOLD}[Cluster 2: ${MANAGED_CLUSTER_NAME}] istio-system Pods:${COLOR_NC}"
+  kubectl --context="${managed_context}" get pods -n "${ISTIO_NAMESPACE}" -o wide
+  echo ""
+  echo -e "${COLOR_BOLD}[Cluster 2: ${MANAGED_CLUSTER_NAME}] apps-ambient Pods:${COLOR_NC}"
+  kubectl --context="${managed_context}" get pods -n apps-ambient -o wide
+  echo ""
+  echo -e "${COLOR_BOLD}Validate Ambient Traffic Command:${COLOR_NC}"
+  echo "  # Control Plane Cluster:"
+  echo "  kubectl --context ${cp_context} exec -n apps-ambient deployment/sleep-client -- curl -s http://echo-server/"
+  echo "  # Managed Cluster:"
+  echo "  kubectl --context ${managed_context} exec -n apps-ambient deployment/sleep-client -- curl -s http://echo-server/"
   echo -e "${COLOR_GREEN}=====================================================================${COLOR_NC}"
 }
 
@@ -442,12 +545,32 @@ print_summary() {
 main() {
   parse_flags "$@"
   check_prerequisites
-  connect_cluster
+  connect_clusters
+
+  local cp_context="gke_${PROJECT_ID}_${CP_LOCATION}_${CP_CLUSTER_NAME}"
+  local managed_context="gke_${PROJECT_ID}_${MANAGED_LOCATION}_${MANAGED_CLUSTER_NAME}"
+
   ensure_dns_zone
+
+  # Ensure Gateway API CRDs on both clusters
+  ensure_gateway_api_crds "${cp_context}" "${CP_CLUSTER_NAME}"
+  ensure_gateway_api_crds "${managed_context}" "${MANAGED_CLUSTER_NAME}"
+
   ensure_argocd_repo_secret
   deploy_argocd_apps
-  wait_for_rollouts
-  deploy_sample_workload
+
+  # Wait for Istio Ambient components
+  wait_for_rollouts_cluster "${cp_context}" "${CP_CLUSTER_NAME}"
+  wait_for_rollouts_cluster "${managed_context}" "${MANAGED_CLUSTER_NAME}"
+
+  # Wait for sample workloads
+  wait_for_sample_workload "${cp_context}" "${CP_CLUSTER_NAME}"
+  wait_for_sample_workload "${managed_context}" "${MANAGED_CLUSTER_NAME}"
+
+  # Validate transparent mTLS traffic
+  validate_ambient_traffic "${cp_context}" "${CP_CLUSTER_NAME}"
+  validate_ambient_traffic "${managed_context}" "${MANAGED_CLUSTER_NAME}"
+
   print_summary
 }
 
