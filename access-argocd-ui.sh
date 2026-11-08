@@ -35,7 +35,6 @@ CLUSTER_NAME="${CLUSTER_NAME:-${DEFAULT_CLUSTER_NAME}}"
 LOCATION="${LOCATION:-${DEFAULT_LOCATION}}"
 ARGOCD_NAMESPACE="${ARGOCD_NAMESPACE:-${DEFAULT_ARGOCD_NAMESPACE}}"
 LOCAL_PORT="${LOCAL_PORT:-${DEFAULT_LOCAL_PORT}}"
-OPEN_BROWSER=false
 
 PF_PID=""
 SSL_KEY=""
@@ -142,7 +141,6 @@ Options:
   -z, --zone ZONE             Alias for --location
   -n, --namespace NAMESPACE   Argo CD namespace (default: ${ARGOCD_NAMESPACE})
       --port PORT             Local port to listen on (default: ${LOCAL_PORT})
-  -o, --open                  Automatically open 1-click auto-login URL in default browser
   -h, --help                  Show this help message
 
 Environment Variables:
@@ -175,10 +173,6 @@ parse_flags() {
       --port)
         LOCAL_PORT="$2"
         shift 2
-        ;;
-      -o|--open)
-        OPEN_BROWSER=true
-        shift
         ;;
       -h|--help)
         usage
@@ -243,27 +237,6 @@ get_admin_password() {
     echo "${raw_pwd}" | base64 -d 2>/dev/null || echo ""
   else
     echo ""
-  fi
-}
-
-#######################################
-# Optionally open URL in default web browser.
-# Arguments:
-#   URL string
-#######################################
-open_url_in_browser() {
-  local url="$1"
-  if [[ "${OPEN_BROWSER}" != "true" ]]; then
-    return 0
-  fi
-
-  log_info "Launching 1-click auto-login URL in default web browser..."
-  if command -v open &>/dev/null; then
-    open "${url}" >/dev/null 2>&1 &
-  elif command -v xdg-open &>/dev/null; then
-    xdg-open "${url}" >/dev/null 2>&1 &
-  elif command -v sensible-browser &>/dev/null; then
-    sensible-browser "${url}" >/dev/null 2>&1 &
   fi
 }
 
@@ -340,9 +313,6 @@ main() {
   echo -e "       Press ${COLOR_BOLD}Ctrl+C${COLOR_NC} at any time to stop port-forwarding."
   echo -e "${COLOR_GREEN}=====================================================================${COLOR_NC}"
   echo ""
-
-  # Open browser if --open was passed
-  open_url_in_browser "${autologin_url}"
 
   # Run auto-login proxy in python3
   python3 -c "

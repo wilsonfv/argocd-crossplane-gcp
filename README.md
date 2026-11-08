@@ -77,9 +77,6 @@ Use the automated access helper to print credentials, establish a local port-for
 ```bash
 # Print credentials, 1-click direct login URL, and start port-forward
 ./access-argocd-ui.sh
-
-# Or automatically launch your default browser with 1-click auto-login
-./access-argocd-ui.sh --open
 ```
 
 When you click the **1-Click Direct Login URL**:
