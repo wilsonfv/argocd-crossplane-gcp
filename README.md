@@ -97,6 +97,13 @@ The GitOps repository refactors Argo CD application manifests using Kustomize in
 - **`argocd/clusters/<cluster-name>/`**: Dedicated folder per cluster containing:
   - `kustomization.yaml`: Inherits from `../../base`, applies cluster name suffix (`-cp`, `-managed-1`, `-managed-2`), and patches the target cluster destination.
   - `cluster-config.yaml`: Cluster-specific configurations, networking metadata, and ConfigMaps.
+  - `05-argocd.yaml` (control plane only): Self-managing Argo CD Application on the control plane cluster.
+
+### Self-Managing Argo CD on Control Plane
+Argo CD on the control plane cluster is managed declaratively by Argo CD itself (`argocd-cp`):
+- Declarative manifests reside in `manifests/argocd/` with Kustomize patches that enforce GCP Workload Identity annotations on `argocd-application-controller` and `argocd-server`.
+- Reconciles and self-heals all Argo CD controllers, server deployments, CRDs, and RBAC policies.
+- Protects runtime cluster secrets and initial credentials via `ignoreDifferences` and non-destructive sync policies.
 
 To deploy Istio Ambient mesh to all 3 clusters:
 ```bash
