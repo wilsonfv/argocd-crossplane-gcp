@@ -33,6 +33,8 @@ readonly COLOR_NC='\033[0m'
 
 # Mutable runtime variables
 PROJECT_ID="${PROJECT_ID:-}"
+CP_PROJECT_ID="${CP_PROJECT_ID:-}"
+MANAGED_PROJECT_ID="${MANAGED_PROJECT_ID:-}"
 CP_CLUSTER_NAME="${CP_CLUSTER_NAME:-${DEFAULT_CP_CLUSTER_NAME}}"
 CP_LOCATION="${CP_LOCATION:-${DEFAULT_CP_LOCATION}}"
 MANAGED_CLUSTER_NAME="${MANAGED_CLUSTER_NAME:-${DEFAULT_MANAGED_CLUSTER_NAME}}"
@@ -128,7 +130,9 @@ Deploys Istio Ambient Mode to Multi-Cluster GKE via Argo CD GitOps manifests:
   - Managed Cluster:       '${MANAGED_CLUSTER_NAME}' in '${MANAGED_LOCATION}'
 
 Options:
-  -p, --project PROJECT_ID          GCP Project ID (default: read from 'gcloud config list' -> ${display_project})
+  -p, --project PROJECT_ID          Default GCP Project ID (default: read from 'gcloud config list' -> ${display_project})
+  --cp-project PROJECT_ID           Control plane cluster GCP project ID (default: ${CP_PROJECT_ID:-${display_project}})
+  --managed-project PROJECT_ID      Managed cluster GCP project ID (default: ${MANAGED_PROJECT_ID:-${display_project}})
   --cp-cluster NAME                 Control plane cluster name (default: ${CP_CLUSTER_NAME})
   --cp-location LOCATION            Control plane cluster location (default: ${CP_LOCATION})
   --managed-cluster NAME            Managed cluster name (default: ${MANAGED_CLUSTER_NAME})
@@ -155,6 +159,14 @@ parse_flags() {
     case "$1" in
       -p|--project)
         PROJECT_ID="$2"
+        shift 2
+        ;;
+      --cp-project)
+        CP_PROJECT_ID="$2"
+        shift 2
+        ;;
+      --managed-project)
+        MANAGED_PROJECT_ID="$2"
         shift 2
         ;;
       --cp-cluster)
@@ -224,8 +236,13 @@ resolve_project_id() {
     log_info "Using specified project ID: ${PROJECT_ID}"
   fi
 
-  log_info "Ensuring active gcloud project is set to: ${PROJECT_ID}"
-  gcloud config set project "${PROJECT_ID}" >/dev/null
+  CP_PROJECT_ID="${CP_PROJECT_ID:-${PROJECT_ID}}"
+  MANAGED_PROJECT_ID="${MANAGED_PROJECT_ID:-${PROJECT_ID}}"
+
+  log_info "Control Plane GCP Project: ${CP_PROJECT_ID}"
+  log_info "Managed Cluster GCP Project: ${MANAGED_PROJECT_ID}"
+  log_info "Ensuring active gcloud project is set to: ${CP_PROJECT_ID}"
+  gcloud config set project "${CP_PROJECT_ID}" >/dev/null
 }
 
 #######################################
@@ -265,20 +282,20 @@ connect_clusters() {
   local managed_loc_flag
   managed_loc_flag="$(format_location_flag "${MANAGED_LOCATION}")"
 
-  log_info "Connecting to Control Plane GKE cluster '${CP_CLUSTER_NAME}' (${CP_LOCATION})..."
-  if ! gcloud container clusters describe "${CP_CLUSTER_NAME}" "${cp_loc_flag}" --project "${PROJECT_ID}" &>/dev/null; then
-    log_error "Control plane cluster '${CP_CLUSTER_NAME}' not found in project ${PROJECT_ID} (${CP_LOCATION})."
+  log_info "Connecting to Control Plane GKE cluster '${CP_CLUSTER_NAME}' in project '${CP_PROJECT_ID}' (${CP_LOCATION})..."
+  if ! gcloud container clusters describe "${CP_CLUSTER_NAME}" "${cp_loc_flag}" --project "${CP_PROJECT_ID}" &>/dev/null; then
+    log_error "Control plane cluster '${CP_CLUSTER_NAME}' not found in project ${CP_PROJECT_ID} (${CP_LOCATION})."
     return 1
   fi
-  gcloud container clusters get-credentials "${CP_CLUSTER_NAME}" "${cp_loc_flag}" --project "${PROJECT_ID}"
+  gcloud container clusters get-credentials "${CP_CLUSTER_NAME}" "${cp_loc_flag}" --project "${CP_PROJECT_ID}"
   log_success "Connected to control plane cluster '${CP_CLUSTER_NAME}'."
 
-  log_info "Connecting to Managed GKE cluster '${MANAGED_CLUSTER_NAME}' (${MANAGED_LOCATION})..."
-  if ! gcloud container clusters describe "${MANAGED_CLUSTER_NAME}" "${managed_loc_flag}" --project "${PROJECT_ID}" &>/dev/null; then
-    log_error "Managed cluster '${MANAGED_CLUSTER_NAME}' not found in project ${PROJECT_ID} (${MANAGED_LOCATION})."
+  log_info "Connecting to Managed GKE cluster '${MANAGED_CLUSTER_NAME}' in project '${MANAGED_PROJECT_ID}' (${MANAGED_LOCATION})..."
+  if ! gcloud container clusters describe "${MANAGED_CLUSTER_NAME}" "${managed_loc_flag}" --project "${MANAGED_PROJECT_ID}" &>/dev/null; then
+    log_error "Managed cluster '${MANAGED_CLUSTER_NAME}' not found in project ${MANAGED_PROJECT_ID} (${MANAGED_LOCATION})."
     return 1
   fi
-  gcloud container clusters get-credentials "${MANAGED_CLUSTER_NAME}" "${managed_loc_flag}" --project "${PROJECT_ID}"
+  gcloud container clusters get-credentials "${MANAGED_CLUSTER_NAME}" "${managed_loc_flag}" --project "${MANAGED_PROJECT_ID}"
   log_success "Connected to managed cluster '${MANAGED_CLUSTER_NAME}'."
 }
 
@@ -288,13 +305,13 @@ connect_clusters() {
 ensure_dns_zone() {
   log_info "Verifying Cloud DNS zone for istio.io registry access..."
   local network
-  network="$(gcloud compute networks list --project="${PROJECT_ID}" --format="value(name)" --filter="name ~ internal" --limit=1 2>/dev/null || true)"
+  network="$(gcloud compute networks list --project="${CP_PROJECT_ID}" --format="value(name)" --filter="name ~ internal" --limit=1 2>/dev/null || true)"
   if [[ -z "${network}" ]]; then
-    network="$(gcloud compute networks list --project="${PROJECT_ID}" --format="value(name)" --limit=1 2>/dev/null || true)"
+    network="$(gcloud compute networks list --project="${CP_PROJECT_ID}" --format="value(name)" --limit=1 2>/dev/null || true)"
   fi
   network="${network:-default}"
 
-  if ! gcloud dns managed-zones describe istio-io --project="${PROJECT_ID}" &>/dev/null; then
+  if ! gcloud dns managed-zones describe istio-io --project="${CP_PROJECT_ID}" &>/dev/null; then
     log_info "Creating Cloud DNS forwarding zone 'istio-io'..."
     gcloud dns managed-zones create istio-io \
       --dns-name="istio.io." \
@@ -302,7 +319,7 @@ ensure_dns_zone() {
       --visibility=private \
       --networks="${network}" \
       --forwarding-targets="8.8.8.8" \
-      --project="${PROJECT_ID}"
+      --project="${CP_PROJECT_ID}"
   else
     log_info "Cloud DNS zone 'istio-io' already configured."
   fi
@@ -327,7 +344,7 @@ ensure_gateway_api_crds() {
 # Configure Argo CD repository Secret for private GitHub repo.
 #######################################
 ensure_argocd_repo_secret() {
-  local cp_context="gke_${PROJECT_ID}_${CP_LOCATION}_${CP_CLUSTER_NAME}"
+  local cp_context="gke_${CP_PROJECT_ID}_${CP_LOCATION}_${CP_CLUSTER_NAME}"
   log_info "Verifying Argo CD credentials for private repository ${ISTIO_REPO_URL}..."
   local secret_name="repo-istio-ambient-config"
   local token="${GITHUB_TOKEN:-}"
@@ -361,7 +378,7 @@ ensure_argocd_repo_secret() {
 # Deploy Argo CD Root Applications for both clusters.
 #######################################
 deploy_argocd_apps() {
-  local cp_context="gke_${PROJECT_ID}_${CP_LOCATION}_${CP_CLUSTER_NAME}"
+  local cp_context="gke_${CP_PROJECT_ID}_${CP_LOCATION}_${CP_CLUSTER_NAME}"
 
   log_info "Deploying Argo CD Root Application for Control Plane cluster..."
   cat <<EOF | kubectl --context="${cp_context}" apply -n "${ARGOCD_NAMESPACE}" -f -
@@ -500,14 +517,15 @@ validate_ambient_traffic() {
 # Print final deployment summary.
 #######################################
 print_summary() {
-  local cp_context="gke_${PROJECT_ID}_${CP_LOCATION}_${CP_CLUSTER_NAME}"
-  local managed_context="gke_${PROJECT_ID}_${MANAGED_LOCATION}_${MANAGED_CLUSTER_NAME}"
+  local cp_context="gke_${CP_PROJECT_ID}_${CP_LOCATION}_${CP_CLUSTER_NAME}"
+  local managed_context="gke_${MANAGED_PROJECT_ID}_${MANAGED_LOCATION}_${MANAGED_CLUSTER_NAME}"
 
   echo ""
   echo -e "${COLOR_GREEN}=====================================================================${COLOR_NC}"
   echo -e "${COLOR_GREEN}   Multi-Cluster Istio Ambient Mode Deployed via Argo CD Complete    ${COLOR_NC}"
   echo -e "${COLOR_GREEN}=====================================================================${COLOR_NC}"
-  echo -e "${COLOR_BOLD}GCP Project:${COLOR_NC}                  ${PROJECT_ID}"
+  echo -e "${COLOR_BOLD}Control Plane Project:${COLOR_NC}        ${CP_PROJECT_ID}"
+  echo -e "${COLOR_BOLD}Managed Cluster Project:${COLOR_NC}      ${MANAGED_PROJECT_ID}"
   echo -e "${COLOR_BOLD}Istio Namespace:${COLOR_NC}              ${ISTIO_NAMESPACE}"
   echo -e "${COLOR_BOLD}Argo CD Namespace:${COLOR_NC}            ${ARGOCD_NAMESPACE}"
   echo ""
@@ -547,8 +565,8 @@ main() {
   check_prerequisites
   connect_clusters
 
-  local cp_context="gke_${PROJECT_ID}_${CP_LOCATION}_${CP_CLUSTER_NAME}"
-  local managed_context="gke_${PROJECT_ID}_${MANAGED_LOCATION}_${MANAGED_CLUSTER_NAME}"
+  local cp_context="gke_${CP_PROJECT_ID}_${CP_LOCATION}_${CP_CLUSTER_NAME}"
+  local managed_context="gke_${MANAGED_PROJECT_ID}_${MANAGED_LOCATION}_${MANAGED_CLUSTER_NAME}"
 
   ensure_dns_zone
 

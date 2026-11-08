@@ -41,7 +41,9 @@ Automated scripts and declarative GitOps source-of-truth configurations followin
 ### Options
 | Option | Env Var | Default | Description |
 |---|---|---|---|
-| `-p`, `--project` | `PROJECT_ID` | `gcloud config list` | Target GCP Project ID (dynamically detected) |
+| `-p`, `--project` | `PROJECT_ID` | `gcloud config list` | Default GCP Project ID (dynamically detected) |
+| `--cp-project` | `CP_PROJECT_ID` | `PROJECT_ID` | Control plane cluster GCP project ID |
+| `--managed-project` | `MANAGED_PROJECT_ID` | `PROJECT_ID` | Managed cluster GCP project ID |
 | `-r`, `--region` | `REGION` | `europe-west1` | GCP region for clusters |
 | `--cp-cluster` | `CP_CLUSTER_NAME` | `argocd-control-plane` | Control plane GKE cluster name |
 | `--cp-subnet` | `CP_SUBNET` | `internal-vpc1-europe-west1-gke` | Control plane subnet |
@@ -55,9 +57,10 @@ Automated scripts and declarative GitOps source-of-truth configurations followin
 
 ### GCP Workload Identity for Managed Cluster Access
 The managed cluster is registered into Argo CD using **GCP Workload Identity** with an `execProviderConfig` cluster secret:
-- GKE clusters are provisioned with `--workload-pool="${PROJECT_ID}.svc.id.goog"`.
-- A Google Cloud Service Account (`argocd-cluster-manager@<PROJECT_ID>.iam.gserviceaccount.com`) is granted `roles/container.developer` and bound to Argo CD's Kubernetes ServiceAccounts (`argocd-application-controller` and `argocd-server`) via `roles/iam.workloadIdentityUser`.
-- The managed cluster secret in Argo CD uses `execProviderConfig` executing `argocd-k8s-auth gcp` to mint short-lived tokens dynamically, eliminating the need to store static bearer tokens or credentials.
+- GKE clusters are provisioned with Workload Identity pools (`--workload-pool="${CP_PROJECT_ID}.svc.id.goog"` and `--workload-pool="${MANAGED_PROJECT_ID}.svc.id.goog"`).
+- **GSA in Control Plane Project**: A Google Cloud Service Account (`argocd-cluster-manager@<CP_PROJECT_ID>.iam.gserviceaccount.com`) is created in the control plane cluster's GCP project and bound to Argo CD's Kubernetes ServiceAccounts (`argocd-application-controller` and `argocd-server`) via `roles/iam.workloadIdentityUser`.
+- **IAM Roles in Managed Project**: The GSA is granted `roles/container.developer` and `roles/container.clusterViewer` in the managed GKE cluster's GCP project (`MANAGED_PROJECT_ID`).
+- **Cluster Secret with `execProviderConfig`**: The managed cluster secret in Argo CD uses `execProviderConfig` with `argocd-k8s-auth gcp` to mint short-lived tokens on the fly, eliminating the need to store static bearer tokens or credentials.
 
 - Access UI: `kubectl config use-context gke_${PROJECT_ID}_europe-west1_argocd-control-plane && kubectl port-forward svc/argocd-server -n argocd 8080:443` -> [https://localhost:8080](https://localhost:8080)
 - Username: `admin`

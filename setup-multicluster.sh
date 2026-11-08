@@ -44,6 +44,8 @@ readonly COLOR_NC='\033[0m'
 
 # Mutable runtime variables
 PROJECT_ID="${PROJECT_ID:-}"
+CP_PROJECT_ID="${CP_PROJECT_ID:-}"
+MANAGED_PROJECT_ID="${MANAGED_PROJECT_ID:-}"
 REGION="${REGION:-${DEFAULT_REGION}}"
 ZONE="${ZONE:-${DEFAULT_ZONE}}"
 VPC_NETWORK="${VPC_NETWORK:-${DEFAULT_VPC}}"
@@ -121,7 +123,9 @@ Sets up a Multi-Cluster GKE environment with Argo CD control plane:
   - Both clusters attach to VPC '${VPC_NETWORK}'
 
 Options:
-  -p, --project PROJECT_ID     GCP Project ID (default: read from 'gcloud config list' -> ${display_project})
+  -p, --project PROJECT_ID     Default GCP Project ID (default: read from 'gcloud config list' -> ${display_project})
+  --cp-project PROJECT_ID      Control plane cluster GCP project ID (default: ${CP_PROJECT_ID:-${display_project}})
+  --managed-project PROJECT_ID Managed cluster GCP project ID (default: ${MANAGED_PROJECT_ID:-${display_project}})
   -r, --region REGION          GCP Region (default: ${REGION})
   -z, --zone ZONE              GCP Zone (optional, overrides region for zonal clusters)
   --network NETWORK            VPC network name (default: auto-detected from project)
@@ -149,6 +153,14 @@ parse_flags() {
     case "$1" in
       -p|--project)
         PROJECT_ID="$2"
+        shift 2
+        ;;
+      --cp-project)
+        CP_PROJECT_ID="$2"
+        shift 2
+        ;;
+      --managed-project)
+        MANAGED_PROJECT_ID="$2"
         shift 2
         ;;
       -r|--region)
@@ -230,12 +242,18 @@ check_prerequisites() {
     PROJECT_ID="$(get_gcloud_config_project)"
   fi
 
-  if [[ -z "${PROJECT_ID}" ]]; then
+  if [[ -z "${PROJECT_ID}" && -z "${CP_PROJECT_ID}" ]]; then
     log_error "No active GCP project found in 'gcloud config list'. Please provide via -p/--project or run 'gcloud config set project <PROJECT_ID>'."
     return 1
   fi
-  log_info "Target GCP Project: ${PROJECT_ID}"
-  gcloud config set project "${PROJECT_ID}" >/dev/null
+
+  CP_PROJECT_ID="${CP_PROJECT_ID:-${PROJECT_ID}}"
+  MANAGED_PROJECT_ID="${MANAGED_PROJECT_ID:-${PROJECT_ID}}"
+  PROJECT_ID="${CP_PROJECT_ID}"
+
+  log_info "Control Plane GCP Project: ${CP_PROJECT_ID}"
+  log_info "Managed Cluster GCP Project: ${MANAGED_PROJECT_ID}"
+  gcloud config set project "${CP_PROJECT_ID}" >/dev/null
 }
 
 #######################################
@@ -286,9 +304,10 @@ format_location_flag() {
 cluster_exists() {
   local cluster_name="$1"
   local location="$2"
+  local project_id="${3:-${PROJECT_ID}}"
   local loc_flag
   loc_flag="$(format_location_flag "${location}")"
-  gcloud container clusters describe "${cluster_name}" "${loc_flag}" --project "${PROJECT_ID}" &>/dev/null
+  gcloud container clusters describe "${cluster_name}" "${loc_flag}" --project "${project_id}" &>/dev/null
 }
 
 #######################################
@@ -297,29 +316,31 @@ cluster_exists() {
 #   Cluster name
 #   Cluster location
 #   Subnet name
+#   Project ID (optional)
 #######################################
 launch_cluster_creation() {
   local cluster_name="$1"
   local location="$2"
   local subnet_name="$3"
+  local project_id="${4:-${PROJECT_ID}}"
   local loc_flag
   loc_flag="$(format_location_flag "${location}")"
 
-  if cluster_exists "${cluster_name}" "${location}"; then
-    log_info "Cluster '${cluster_name}' already exists in ${location}. Skipping creation."
+  if cluster_exists "${cluster_name}" "${location}" "${project_id}"; then
+    log_info "Cluster '${cluster_name}' already exists in ${location} (project '${project_id}'). Skipping creation."
     return 0
   fi
 
-  log_info "Initiating creation of cluster '${cluster_name}' in ${location} (subnet '${subnet_name}')..."
+  log_info "Initiating creation of cluster '${cluster_name}' in ${location} (project '${project_id}', subnet '${subnet_name}')..."
   gcloud container clusters create "${cluster_name}" \
     "${loc_flag}" \
-    --project "${PROJECT_ID}" \
+    --project "${project_id}" \
     --network "${VPC_NETWORK}" \
     --subnetwork "${subnet_name}" \
     --cluster-secondary-range-name "${POD_RANGE}" \
     --services-secondary-range-name "${SERVICE_RANGE}" \
     --enable-ip-alias \
-    --workload-pool="${PROJECT_ID}.svc.id.goog" \
+    --workload-pool="${project_id}.svc.id.goog" \
     --num-nodes "${NUM_NODES}" \
     --machine-type "${MACHINE_TYPE}" \
     --release-channel "regular" \
@@ -332,17 +353,19 @@ launch_cluster_creation() {
 # Arguments:
 #   Cluster name.
 #   Cluster location.
+#   Project ID (optional)
 #######################################
 wait_for_cluster_running() {
   local cluster_name="$1"
   local location="$2"
+  local project_id="${3:-${PROJECT_ID}}"
   local loc_flag
   loc_flag="$(format_location_flag "${location}")"
 
-  log_info "Waiting for cluster '${cluster_name}' in ${location} to reach RUNNING status..."
+  log_info "Waiting for cluster '${cluster_name}' in ${location} (project '${project_id}') to reach RUNNING status..."
   while true; do
     local status
-    status="$(gcloud container clusters describe "${cluster_name}" "${loc_flag}" --project "${PROJECT_ID}" --format="value(status)" 2>/dev/null || echo "PENDING")"
+    status="$(gcloud container clusters describe "${cluster_name}" "${loc_flag}" --project "${project_id}" --format="value(status)" 2>/dev/null || echo "PENDING")"
     if [[ "${status}" == "RUNNING" ]]; then
       log_success "Cluster '${cluster_name}' is RUNNING."
       break
@@ -359,22 +382,24 @@ wait_for_cluster_running() {
 # Arguments:
 #   Cluster name.
 #   Cluster location.
+#   Project ID (optional)
 #######################################
 fetch_cluster_credentials() {
   local cluster_name="$1"
   local location="$2"
+  local project_id="${3:-${PROJECT_ID}}"
   local loc_flag
   loc_flag="$(format_location_flag "${location}")"
 
-  log_info "Fetching kubeconfig credentials for '${cluster_name}' in ${location}..."
-  gcloud container clusters get-credentials "${cluster_name}" "${loc_flag}" --project "${PROJECT_ID}"
+  log_info "Fetching kubeconfig credentials for '${cluster_name}' in ${location} (project '${project_id}')..."
+  gcloud container clusters get-credentials "${cluster_name}" "${loc_flag}" --project "${project_id}"
 }
 
 #######################################
 # Deploy Argo CD to the control plane cluster.
 #######################################
 install_argocd_control_plane() {
-  local cp_context="gke_${PROJECT_ID}_${CP_LOCATION}_${CP_CLUSTER_NAME}"
+  local cp_context="gke_${CP_PROJECT_ID}_${CP_LOCATION}_${CP_CLUSTER_NAME}"
 
   log_info "Switching kubectl context to control plane: ${cp_context}..."
   kubectl config use-context "${cp_context}"
@@ -399,39 +424,47 @@ install_argocd_control_plane() {
 
 #######################################
 # Setup GCP Workload Identity for Argo CD to access managed clusters.
+# Creates GSA in control plane cluster GCP project, and grants IAM roles
+# in managed GKE cluster GCP project.
 #######################################
 setup_workload_identity_for_argocd() {
-  local cp_context="gke_${PROJECT_ID}_${CP_LOCATION}_${CP_CLUSTER_NAME}"
-  local managed_context="gke_${PROJECT_ID}_${MANAGED_LOCATION}_${MANAGED_CLUSTER_NAME}"
-  local gsa_email="${ARGOCD_GSA_NAME}@${PROJECT_ID}.iam.gserviceaccount.com"
+  local cp_context="gke_${CP_PROJECT_ID}_${CP_LOCATION}_${CP_CLUSTER_NAME}"
+  local managed_context="gke_${MANAGED_PROJECT_ID}_${MANAGED_LOCATION}_${MANAGED_CLUSTER_NAME}"
+  local gsa_email="${ARGOCD_GSA_NAME}@${CP_PROJECT_ID}.iam.gserviceaccount.com"
 
-  log_info "Configuring GCP Workload Identity for Argo CD (${gsa_email})..."
+  log_info "Configuring GCP Workload Identity for Argo CD..."
+  log_info "  - Control plane GCP project (GSA host): ${CP_PROJECT_ID}"
+  log_info "  - Managed GKE cluster GCP project:     ${MANAGED_PROJECT_ID}"
+  log_info "  - GSA email:                           ${gsa_email}"
 
-  # 1. Create Google Cloud Service Account (GSA) if needed
-  if ! gcloud iam service-accounts describe "${gsa_email}" --project="${PROJECT_ID}" &>/dev/null; then
-    log_info "Creating GCP Service Account '${gsa_email}'..."
+  # 1. Create Google Cloud Service Account (GSA) in the control plane cluster GCP project
+  if ! gcloud iam service-accounts describe "${gsa_email}" --project="${CP_PROJECT_ID}" &>/dev/null; then
+    log_info "Creating GCP Service Account '${ARGOCD_GSA_NAME}' in control plane cluster project '${CP_PROJECT_ID}'..."
     gcloud iam service-accounts create "${ARGOCD_GSA_NAME}" \
-      --project="${PROJECT_ID}" \
+      --project="${CP_PROJECT_ID}" \
       --display-name="Argo CD Cluster Manager Workload Identity"
   else
-    log_info "GCP Service Account '${gsa_email}' already exists."
+    log_info "GCP Service Account '${gsa_email}' already exists in control plane cluster project '${CP_PROJECT_ID}'."
   fi
 
-  # 2. Grant project-level container permissions to GSA so it can access GKE clusters
-  log_info "Granting 'roles/container.developer' to '${gsa_email}' on project '${PROJECT_ID}'..."
-  gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
-    --member="serviceAccount:${gsa_email}" \
-    --role="roles/container.developer" \
-    --quiet >/dev/null
+  # 2. Grant IAM roles in the managed GKE cluster GCP project
+  local role
+  for role in roles/container.developer roles/container.clusterViewer; do
+    log_info "Granting '${role}' to '${gsa_email}' on managed GKE cluster project '${MANAGED_PROJECT_ID}'..."
+    gcloud projects add-iam-policy-binding "${MANAGED_PROJECT_ID}" \
+      --member="serviceAccount:${gsa_email}" \
+      --role="${role}" \
+      --quiet >/dev/null
+  done
 
-  # 3. Bind Kubernetes SAs in Argo CD namespace to GSA via roles/iam.workloadIdentityUser
+  # 3. Bind Kubernetes SAs in Argo CD namespace to GSA via roles/iam.workloadIdentityUser in control plane project
   local ksa
   for ksa in argocd-application-controller argocd-server; do
-    log_info "Binding KSA '${ksa}' to GSA '${gsa_email}' via Workload Identity..."
+    log_info "Binding KSA '${ksa}' to GSA '${gsa_email}' via Workload Identity in control plane project '${CP_PROJECT_ID}'..."
     gcloud iam service-accounts add-iam-policy-binding "${gsa_email}" \
-      --project="${PROJECT_ID}" \
+      --project="${CP_PROJECT_ID}" \
       --role="roles/iam.workloadIdentityUser" \
-      --member="serviceAccount:${PROJECT_ID}.svc.id.goog[${ARGOCD_NAMESPACE}/${ksa}]" \
+      --member="serviceAccount:${CP_PROJECT_ID}.svc.id.goog[${ARGOCD_NAMESPACE}/${ksa}]" \
       --quiet >/dev/null
 
     kubectl --context="${cp_context}" -n "${ARGOCD_NAMESPACE}" annotate serviceaccount "${ksa}" \
@@ -451,23 +484,23 @@ setup_workload_identity_for_argocd() {
   kubectl --context="${cp_context}" -n "${ARGOCD_NAMESPACE}" rollout restart deployment/argocd-server >/dev/null
   kubectl --context="${cp_context}" -n "${ARGOCD_NAMESPACE}" rollout status statefulset/argocd-application-controller --timeout=180s
   kubectl --context="${cp_context}" -n "${ARGOCD_NAMESPACE}" rollout status deployment/argocd-server --timeout=180s
-  log_success "GCP Workload Identity configured successfully for Argo CD."
+  log_success "GCP Workload Identity configured successfully for Argo CD across control plane and managed projects."
 }
 
 #######################################
 # Register the managed cluster into Argo CD using GCP Workload Identity execProviderConfig.
 #######################################
 register_managed_cluster() {
-  local cp_context="gke_${PROJECT_ID}_${CP_LOCATION}_${CP_CLUSTER_NAME}"
+  local cp_context="gke_${CP_PROJECT_ID}_${CP_LOCATION}_${CP_CLUSTER_NAME}"
   local managed_loc_flag
   managed_loc_flag="$(format_location_flag "${MANAGED_LOCATION}")"
 
   log_info "Registering managed cluster '${MANAGED_CLUSTER_NAME}' into Argo CD via GCP Workload Identity..."
 
-  # Fetch endpoint and CA certificate from GKE
+  # Fetch endpoint and CA certificate from GKE in managed GKE cluster project
   local endpoint ca_cert
-  endpoint="$(gcloud container clusters describe "${MANAGED_CLUSTER_NAME}" "${managed_loc_flag}" --project="${PROJECT_ID}" --format="value(endpoint)")"
-  ca_cert="$(gcloud container clusters describe "${MANAGED_CLUSTER_NAME}" "${managed_loc_flag}" --project="${PROJECT_ID}" --format="value(masterAuth.clusterCaCertificate)")"
+  endpoint="$(gcloud container clusters describe "${MANAGED_CLUSTER_NAME}" "${managed_loc_flag}" --project="${MANAGED_PROJECT_ID}" --format="value(endpoint)")"
+  ca_cert="$(gcloud container clusters describe "${MANAGED_CLUSTER_NAME}" "${managed_loc_flag}" --project="${MANAGED_PROJECT_ID}" --format="value(masterAuth.clusterCaCertificate)")"
 
   # Clean up any legacy or duplicate cluster secret for this cluster
   kubectl --context="${cp_context}" -n "${ARGOCD_NAMESPACE}" delete secret \
@@ -509,8 +542,9 @@ EOF
 # Print final deployment summary.
 #######################################
 print_summary() {
-  local cp_context="gke_${PROJECT_ID}_${CP_LOCATION}_${CP_CLUSTER_NAME}"
-  local managed_context="gke_${PROJECT_ID}_${MANAGED_LOCATION}_${MANAGED_CLUSTER_NAME}"
+  local cp_context="gke_${CP_PROJECT_ID}_${CP_LOCATION}_${CP_CLUSTER_NAME}"
+  local managed_context="gke_${MANAGED_PROJECT_ID}_${MANAGED_LOCATION}_${MANAGED_CLUSTER_NAME}"
+  local gsa_email="${ARGOCD_GSA_NAME}@${CP_PROJECT_ID}.iam.gserviceaccount.com"
 
   kubectl config use-context "${cp_context}" >/dev/null
   local admin_password
@@ -520,10 +554,14 @@ print_summary() {
   echo -e "${COLOR_GREEN}=====================================================================${COLOR_NC}"
   echo -e "${COLOR_GREEN}    Multi-Cluster GKE Setup with Argo CD Control Plane Complete      ${COLOR_NC}"
   echo -e "${COLOR_GREEN}=====================================================================${COLOR_NC}"
-  echo -e "${COLOR_BOLD}GCP Project:${COLOR_NC}                 ${PROJECT_ID}"
+  echo -e "${COLOR_BOLD}Control Plane Project:${COLOR_NC}       ${CP_PROJECT_ID}"
+  echo -e "${COLOR_BOLD}Managed Cluster Project:${COLOR_NC}     ${MANAGED_PROJECT_ID}"
+  echo -e "${COLOR_BOLD}Workload Identity GSA:${COLOR_NC}       ${gsa_email} (in ${CP_PROJECT_ID})"
+  echo -e "${COLOR_BOLD}GSA IAM Roles in Managed:${COLOR_NC}    roles/container.developer, roles/container.clusterViewer (in ${MANAGED_PROJECT_ID})"
   echo -e "${COLOR_BOLD}VPC Network:${COLOR_NC}                 ${VPC_NETWORK}"
   echo ""
   echo -e "${COLOR_BOLD}Cluster 1 (Control Plane):${COLOR_NC}   ${CP_CLUSTER_NAME}"
+  echo -e "  - Project:                 ${CP_PROJECT_ID}"
   echo -e "  - Location:                ${CP_LOCATION}"
   echo -e "  - Subnet:                  ${CP_SUBNET}"
   echo -e "  - Kube Context:            ${cp_context}"
@@ -532,10 +570,11 @@ print_summary() {
   echo -e "  - Admin Password:          ${admin_password}"
   echo ""
   echo -e "${COLOR_BOLD}Cluster 2 (Managed):${COLOR_NC}         ${MANAGED_CLUSTER_NAME}"
+  echo -e "  - Project:                 ${MANAGED_PROJECT_ID}"
   echo -e "  - Location:                ${MANAGED_LOCATION}"
   echo -e "  - Subnet:                  ${MANAGED_SUBNET}"
   echo -e "  - Kube Context:            ${managed_context}"
-  echo -e "  - Managed By:              ${CP_CLUSTER_NAME} (Argo CD)"
+  echo -e "  - Managed By:              ${CP_CLUSTER_NAME} (Argo CD via Workload Identity)"
   echo ""
   echo -e "${COLOR_BOLD}Argo CD Managed Clusters:${COLOR_NC}"
   argocd cluster list --core --kube-context "${cp_context}" --loglevel debug || true
@@ -559,8 +598,8 @@ delete_clusters() {
   local confirm="${AUTO_APPROVE}"
   if [[ "${confirm}" != "true" ]]; then
     echo -e "${COLOR_YELLOW}[WARN]${COLOR_NC} You are about to permanently DELETE:"
-    echo "  - Control plane cluster: '${CP_CLUSTER_NAME}' in ${CP_LOCATION}"
-    echo "  - Managed cluster:       '${MANAGED_CLUSTER_NAME}' in ${MANAGED_LOCATION}"
+    echo "  - Control plane cluster: '${CP_CLUSTER_NAME}' in ${CP_LOCATION} (project: ${CP_PROJECT_ID})"
+    echo "  - Managed cluster:       '${MANAGED_CLUSTER_NAME}' in ${MANAGED_LOCATION} (project: ${MANAGED_PROJECT_ID})"
     echo -n "Are you sure you want to proceed? [y/N]: "
     read -r confirm
   fi
@@ -570,18 +609,18 @@ delete_clusters() {
     return 0
   fi
 
-  if cluster_exists "${CP_CLUSTER_NAME}" "${CP_LOCATION}"; then
-    log_info "Deleting control plane cluster '${CP_CLUSTER_NAME}' (${CP_LOCATION})..."
-    gcloud container clusters delete "${CP_CLUSTER_NAME}" "${cp_loc_flag}" --project "${PROJECT_ID}" --quiet --async
+  if cluster_exists "${CP_CLUSTER_NAME}" "${CP_LOCATION}" "${CP_PROJECT_ID}"; then
+    log_info "Deleting control plane cluster '${CP_CLUSTER_NAME}' (${CP_LOCATION}, project: ${CP_PROJECT_ID})..."
+    gcloud container clusters delete "${CP_CLUSTER_NAME}" "${cp_loc_flag}" --project "${CP_PROJECT_ID}" --quiet --async
   fi
 
-  if cluster_exists "${MANAGED_CLUSTER_NAME}" "${MANAGED_LOCATION}"; then
-    log_info "Deleting managed cluster '${MANAGED_CLUSTER_NAME}' (${MANAGED_LOCATION})..."
-    gcloud container clusters delete "${MANAGED_CLUSTER_NAME}" "${managed_loc_flag}" --project "${PROJECT_ID}" --quiet --async
+  if cluster_exists "${MANAGED_CLUSTER_NAME}" "${MANAGED_LOCATION}" "${MANAGED_PROJECT_ID}"; then
+    log_info "Deleting managed cluster '${MANAGED_CLUSTER_NAME}' (${MANAGED_LOCATION}, project: ${MANAGED_PROJECT_ID})..."
+    gcloud container clusters delete "${MANAGED_CLUSTER_NAME}" "${managed_loc_flag}" --project "${MANAGED_PROJECT_ID}" --quiet --async
   fi
 
   log_info "Waiting for cluster deletions to complete..."
-  while cluster_exists "${CP_CLUSTER_NAME}" "${CP_LOCATION}" || cluster_exists "${MANAGED_CLUSTER_NAME}" "${MANAGED_LOCATION}"; do
+  while cluster_exists "${CP_CLUSTER_NAME}" "${CP_LOCATION}" "${CP_PROJECT_ID}" || cluster_exists "${MANAGED_CLUSTER_NAME}" "${MANAGED_LOCATION}" "${MANAGED_PROJECT_ID}"; do
     sleep 10
   done
 
@@ -602,16 +641,16 @@ main() {
   fi
 
   log_info "Phase 1: Ensuring GKE clusters exist..."
-  launch_cluster_creation "${CP_CLUSTER_NAME}" "${CP_LOCATION}" "${CP_SUBNET}"
-  launch_cluster_creation "${MANAGED_CLUSTER_NAME}" "${MANAGED_LOCATION}" "${MANAGED_SUBNET}"
+  launch_cluster_creation "${CP_CLUSTER_NAME}" "${CP_LOCATION}" "${CP_SUBNET}" "${CP_PROJECT_ID}"
+  launch_cluster_creation "${MANAGED_CLUSTER_NAME}" "${MANAGED_LOCATION}" "${MANAGED_SUBNET}" "${MANAGED_PROJECT_ID}"
 
   log_info "Phase 2: Waiting for both clusters to reach RUNNING status..."
-  wait_for_cluster_running "${CP_CLUSTER_NAME}" "${CP_LOCATION}"
-  wait_for_cluster_running "${MANAGED_CLUSTER_NAME}" "${MANAGED_LOCATION}"
+  wait_for_cluster_running "${CP_CLUSTER_NAME}" "${CP_LOCATION}" "${CP_PROJECT_ID}"
+  wait_for_cluster_running "${MANAGED_CLUSTER_NAME}" "${MANAGED_LOCATION}" "${MANAGED_PROJECT_ID}"
 
   log_info "Phase 3: Fetching cluster credentials..."
-  fetch_cluster_credentials "${CP_CLUSTER_NAME}" "${CP_LOCATION}"
-  fetch_cluster_credentials "${MANAGED_CLUSTER_NAME}" "${MANAGED_LOCATION}"
+  fetch_cluster_credentials "${CP_CLUSTER_NAME}" "${CP_LOCATION}" "${CP_PROJECT_ID}"
+  fetch_cluster_credentials "${MANAGED_CLUSTER_NAME}" "${MANAGED_LOCATION}" "${MANAGED_PROJECT_ID}"
 
   log_info "Phase 4: Deploying Argo CD to control plane cluster..."
   install_argocd_control_plane
