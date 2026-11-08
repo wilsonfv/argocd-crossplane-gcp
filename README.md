@@ -11,6 +11,7 @@ Automated scripts and declarative GitOps source-of-truth configurations followin
 ├── setup-multicluster.sh      # Provisions 3-cluster GKE & configures Argo CD via Workload Identity
 ├── install-crossplane.sh      # Installs latest Crossplane on GKE via Helm
 ├── deploy-istio-ambient.sh    # Deploys Istio Ambient Mode across all 3 clusters via Argo CD
+├── access-argocd-ui.sh        # Port-forwards Argo CD Web UI & displays admin credentials
 └── README.md
 ```
 
@@ -71,6 +72,17 @@ Both managed clusters are registered into Argo CD using **GCP Workload Identity*
 - **IAM Roles in Managed Projects**: The GSA is granted `roles/container.developer` and `roles/container.clusterViewer` across the managed cluster projects.
 - **Cluster Secret with `execProviderConfig`**: The managed cluster secrets in Argo CD use `execProviderConfig` with `argocd-k8s-auth gcp` to mint short-lived tokens on the fly, eliminating the need to store static bearer tokens or credentials.
 
+### Access Argo CD Web UI & Admin Credentials
+Use the automated access helper to print credentials and establish a secure local port-forward:
+```bash
+# Print admin credentials and start port-forward (https://localhost:8080)
+./access-argocd-ui.sh
+
+# Or automatically launch your default browser
+./access-argocd-ui.sh --open
+```
+
+Manual access commands:
 - Access UI: `kubectl config use-context gke_${PROJECT_ID}_europe-west1_argocd-control-plane && kubectl port-forward svc/argocd-server -n argocd 8080:443` -> [https://localhost:8080](https://localhost:8080)
 - Username: `admin`
 - Password: `kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d && echo`
