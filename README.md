@@ -72,15 +72,21 @@ Both managed clusters are registered into Argo CD using **GCP Workload Identity*
 - **IAM Roles in Managed Projects**: The GSA is granted `roles/container.developer` and `roles/container.clusterViewer` across the managed cluster projects.
 - **Cluster Secret with `execProviderConfig`**: The managed cluster secrets in Argo CD use `execProviderConfig` with `argocd-k8s-auth gcp` to mint short-lived tokens on the fly, eliminating the need to store static bearer tokens or credentials.
 
-### Access Argo CD Web UI & Admin Credentials
-Use the automated access helper to print credentials and establish a secure local port-forward:
+### Access Argo CD Web UI & 1-Click Direct Login
+Use the automated access helper to print credentials, establish a local port-forward, and provide 1-click direct login URLs:
 ```bash
-# Print admin credentials and start port-forward (https://localhost:8080)
+# Print credentials, 1-click direct login URL, and start port-forward
 ./access-argocd-ui.sh
 
-# Or automatically launch your default browser
+# Or automatically launch your default browser with 1-click auto-login
 ./access-argocd-ui.sh --open
 ```
+
+When you click the **1-Click Direct Login URL**:
+- `https://localhost:8080/?username=admin&password=<PASSWORD>`
+- Or `https://admin:<PASSWORD>@localhost:8080/`
+
+The local bridge securely exchanges credentials for a session token, sets the `argocd.token` cookie, and opens the UI directly into `/applications` without requiring any manual entry.
 
 Manual access commands:
 - Access UI: `kubectl config use-context gke_${PROJECT_ID}_europe-west1_argocd-control-plane && kubectl port-forward svc/argocd-server -n argocd 8080:443` -> [https://localhost:8080](https://localhost:8080)
