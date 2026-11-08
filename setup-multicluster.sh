@@ -23,6 +23,9 @@ readonly DEFAULT_REGION="europe-west1"
 readonly DEFAULT_ZONE=""
 readonly DEFAULT_VPC=""
 
+readonly DEFAULT_CP_PROJECT_ID="mq-usecase-1"
+readonly DEFAULT_MANAGED_PROJECT_ID="mq-usecase-2"
+
 # Cluster 1 (Control Plane)
 readonly DEFAULT_CP_CLUSTER_NAME="argocd-control-plane"
 readonly DEFAULT_CP_LOCATION="europe-west1"
@@ -32,14 +35,14 @@ readonly DEFAULT_CP_SUBNET="internal-vpc1-europe-west1-gke"
 # Cluster 2 (Managed 1)
 readonly DEFAULT_MANAGED1_CLUSTER_NAME="gke-managed-cluster"
 readonly DEFAULT_MANAGED1_LOCATION="europe-west1-b"
-readonly DEFAULT_MANAGED1_VPC="mq-usecase-1-internal-vpc1"
-readonly DEFAULT_MANAGED1_SUBNET="internal-vpc1-europe-west1-gke2"
+readonly DEFAULT_MANAGED1_VPC="mq-usecase-2-internal-vpc1"
+readonly DEFAULT_MANAGED1_SUBNET="internal-vpc1-europe-west1-gke"
 
 # Cluster 3 (Managed 2)
 readonly DEFAULT_MANAGED2_CLUSTER_NAME="gke-managed-cluster-2"
 readonly DEFAULT_MANAGED2_LOCATION="europe-west1-b"
-readonly DEFAULT_MANAGED2_VPC="mq-usecase-1-internal-vpc2"
-readonly DEFAULT_MANAGED2_SUBNET="internal-vpc2-europe-west1-gke"
+readonly DEFAULT_MANAGED2_VPC="mq-usecase-2-internal-vpc1"
+readonly DEFAULT_MANAGED2_SUBNET="internal-vpc1-europe-west1-gke2"
 
 readonly DEFAULT_POD_RANGE="gke-pod"
 readonly DEFAULT_SERVICE_RANGE="gke-service"
@@ -58,9 +61,9 @@ readonly COLOR_NC='\033[0m'
 
 # Mutable runtime variables
 PROJECT_ID="${PROJECT_ID:-}"
-CP_PROJECT_ID="${CP_PROJECT_ID:-}"
-MANAGED1_PROJECT_ID="${MANAGED1_PROJECT_ID:-}"
-MANAGED2_PROJECT_ID="${MANAGED2_PROJECT_ID:-}"
+CP_PROJECT_ID="${CP_PROJECT_ID:-${DEFAULT_CP_PROJECT_ID}}"
+MANAGED1_PROJECT_ID="${MANAGED1_PROJECT_ID:-${DEFAULT_MANAGED_PROJECT_ID}}"
+MANAGED2_PROJECT_ID="${MANAGED2_PROJECT_ID:-${DEFAULT_MANAGED_PROJECT_ID}}"
 REGION="${REGION:-${DEFAULT_REGION}}"
 ZONE="${ZONE:-${DEFAULT_ZONE}}"
 

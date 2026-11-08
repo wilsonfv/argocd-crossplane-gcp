@@ -36,29 +36,30 @@ Automated scripts and declarative GitOps source-of-truth configurations followin
 ```
 
 ### 3-Cluster Architecture
-1. **Cluster 1 (Control Plane)**: `argocd-control-plane` in VPC `mq-usecase-1-internal-vpc1`, subnet `internal-vpc1-europe-west1-gke` (`europe-west1`).
-2. **Cluster 2 (Managed 1)**: `gke-managed-cluster-1` in VPC `mq-usecase-1-internal-vpc1`, subnet `internal-vpc1-europe-west1-gke2` (`europe-west1-b`).
-3. **Cluster 3 (Managed 2)**: `gke-managed-cluster-2` in VPC `mq-usecase-1-internal-vpc2`, subnet `internal-vpc2-europe-west1-gke` (`europe-west1-b`).
+1. **Cluster 1 (Control Plane)**: `argocd-control-plane` in GCP Project `mq-usecase-1`, VPC `mq-usecase-1-internal-vpc1`, subnet `internal-vpc1-europe-west1-gke` (`europe-west1`).
+2. **Cluster 2 (Managed 1)**: `gke-managed-cluster` in GCP Project `mq-usecase-2`, VPC `mq-usecase-2-internal-vpc1`, subnet `internal-vpc1-europe-west1-gke` (`europe-west1-b`).
+3. **Cluster 3 (Managed 2)**: `gke-managed-cluster-2` in GCP Project `mq-usecase-2`, VPC `mq-usecase-2-internal-vpc1`, subnet `internal-vpc1-europe-west1-gke2` (`europe-west1-b`).
 
 ### Options
 | Option | Env Var | Default | Description |
 |---|---|---|---|
 | `-p`, `--project` | `PROJECT_ID` | `gcloud config list` | Default GCP Project ID (dynamically detected) |
-| `--cp-project` | `CP_PROJECT_ID` | `PROJECT_ID` | Control plane cluster GCP project ID |
-| `--managed1-project` | `MANAGED1_PROJECT_ID` | `PROJECT_ID` | Managed cluster 1 GCP project ID |
-| `--managed2-project` | `MANAGED2_PROJECT_ID` | `PROJECT_ID` | Managed cluster 2 GCP project ID |
+| `--cp-project` | `CP_PROJECT_ID` | `mq-usecase-1` | Control plane cluster GCP project ID |
+| `--managed1-project` | `MANAGED1_PROJECT_ID` | `mq-usecase-2` | Managed cluster 1 GCP project ID |
+| `--managed2-project` | `MANAGED2_PROJECT_ID` | `mq-usecase-2` | Managed cluster 2 GCP project ID |
+| `--managed-project` | `MANAGED_PROJECT_ID` | `mq-usecase-2` | Sets both managed cluster project IDs |
 | `--cp-cluster` | `CP_CLUSTER_NAME` | `argocd-control-plane` | Control plane GKE cluster name |
 | `--cp-location` | `CP_LOCATION` | `europe-west1` | Control plane location |
 | `--cp-network` | `CP_VPC_NETWORK` | `mq-usecase-1-internal-vpc1` | Control plane VPC network |
 | `--cp-subnet` | `CP_SUBNET` | `internal-vpc1-europe-west1-gke` | Control plane subnet |
-| `--managed1-cluster`| `MANAGED1_CLUSTER_NAME`| `gke-managed-cluster-1`| Managed GKE cluster 1 name |
+| `--managed1-cluster`| `MANAGED1_CLUSTER_NAME`| `gke-managed-cluster` | Managed GKE cluster 1 name |
 | `--managed1-location`| `MANAGED1_LOCATION`| `europe-west1-b` | Managed GKE cluster 1 location |
-| `--managed1-network` | `MANAGED1_VPC_NETWORK` | `mq-usecase-1-internal-vpc1` | Managed cluster 1 VPC network |
-| `--managed1-subnet` | `MANAGED1_SUBNET` | `internal-vpc1-europe-west1-gke2`| Managed cluster 1 subnet |
+| `--managed1-network` | `MANAGED1_VPC_NETWORK` | `mq-usecase-2-internal-vpc1` | Managed cluster 1 VPC network |
+| `--managed1-subnet` | `MANAGED1_SUBNET` | `internal-vpc1-europe-west1-gke` | Managed cluster 1 subnet |
 | `--managed2-cluster`| `MANAGED2_CLUSTER_NAME`| `gke-managed-cluster-2`| Managed GKE cluster 2 name |
 | `--managed2-location`| `MANAGED2_LOCATION`| `europe-west1-b` | Managed GKE cluster 2 location |
-| `--managed2-network` | `MANAGED2_VPC_NETWORK` | `mq-usecase-1-internal-vpc2` | Managed cluster 2 VPC network |
-| `--managed2-subnet` | `MANAGED2_SUBNET` | `internal-vpc2-europe-west1-gke` | Managed cluster 2 subnet |
+| `--managed2-network` | `MANAGED2_VPC_NETWORK` | `mq-usecase-2-internal-vpc1` | Managed cluster 2 VPC network |
+| `--managed2-subnet` | `MANAGED2_SUBNET` | `internal-vpc1-europe-west1-gke2`| Managed cluster 2 subnet |
 | `--gsa-name` | `ARGOCD_GSA_NAME` | `argocd-cluster-manager` | GCP Service Account for Workload Identity |
 | `-m`, `--machine-type` | `MACHINE_TYPE` | `e2-standard-4` | Node machine type |
 | `-n`, `--num-nodes` | `NUM_NODES` | `1` | Nodes per zone |
@@ -135,14 +136,14 @@ Workloads in the `apps-ambient` namespace have the label `istio.io/dataplane-mod
 
 Send a test HTTP request from the sleep client to the echo server on each cluster:
 ```bash
-# Control plane cluster:
-kubectl --context gke_${PROJECT_ID}_europe-west1_argocd-control-plane exec -n apps-ambient deployment/sleep-client -- curl -s http://echo-server/
+# Control plane cluster (mq-usecase-1):
+kubectl --context gke_mq-usecase-1_europe-west1_argocd-control-plane exec -n apps-ambient deployment/sleep-client -- curl -s http://echo-server/
 
-# Managed cluster 1:
-kubectl --context gke_${PROJECT_ID}_europe-west1-b_gke-managed-cluster-1 exec -n apps-ambient deployment/sleep-client -- curl -s http://echo-server/
+# Managed cluster 1 (mq-usecase-2):
+kubectl --context gke_mq-usecase-2_europe-west1-b_gke-managed-cluster exec -n apps-ambient deployment/sleep-client -- curl -s http://echo-server/
 
-# Managed cluster 2:
-kubectl --context gke_${PROJECT_ID}_europe-west1-b_gke-managed-cluster-2 exec -n apps-ambient deployment/sleep-client -- curl -s http://echo-server/
+# Managed cluster 2 (mq-usecase-2):
+kubectl --context gke_mq-usecase-2_europe-west1-b_gke-managed-cluster-2 exec -n apps-ambient deployment/sleep-client -- curl -s http://echo-server/
 ```
 
 Inspect `ztunnel` logs to verify transparent mTLS proxying:

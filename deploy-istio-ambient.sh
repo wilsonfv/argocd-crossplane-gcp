@@ -19,6 +19,9 @@ set -o pipefail
 # -----------------------------------------------------------------------------
 # Global Constants and Defaults
 # -----------------------------------------------------------------------------
+readonly DEFAULT_CP_PROJECT_ID="mq-usecase-1"
+readonly DEFAULT_MANAGED_PROJECT_ID="mq-usecase-2"
+
 readonly DEFAULT_CP_CLUSTER_NAME="argocd-control-plane"
 readonly DEFAULT_CP_LOCATION="europe-west1"
 readonly DEFAULT_MANAGED1_CLUSTER_NAME="gke-managed-cluster"
@@ -39,9 +42,9 @@ readonly COLOR_NC='\033[0m'
 
 # Mutable runtime variables
 PROJECT_ID="${PROJECT_ID:-}"
-CP_PROJECT_ID="${CP_PROJECT_ID:-}"
-MANAGED1_PROJECT_ID="${MANAGED1_PROJECT_ID:-}"
-MANAGED2_PROJECT_ID="${MANAGED2_PROJECT_ID:-}"
+CP_PROJECT_ID="${CP_PROJECT_ID:-${DEFAULT_CP_PROJECT_ID}}"
+MANAGED1_PROJECT_ID="${MANAGED1_PROJECT_ID:-${DEFAULT_MANAGED_PROJECT_ID}}"
+MANAGED2_PROJECT_ID="${MANAGED2_PROJECT_ID:-${DEFAULT_MANAGED_PROJECT_ID}}"
 
 CP_CLUSTER_NAME="${CP_CLUSTER_NAME:-${DEFAULT_CP_CLUSTER_NAME}}"
 CP_LOCATION="${CP_LOCATION:-${DEFAULT_CP_LOCATION}}"
@@ -327,20 +330,35 @@ connect_clusters() {
 #######################################
 ensure_dns_zone() {
   log_info "Verifying Cloud DNS zone for istio.io registry access across VPC networks..."
-  local vpc1="mq-usecase-1-internal-vpc1"
-  local vpc2="mq-usecase-1-internal-vpc2"
+  local cp_vpc="mq-usecase-1-internal-vpc1"
+  local managed_vpc="mq-usecase-2-internal-vpc1"
 
+  # Ensure DNS forwarding in control plane project
   if ! gcloud dns managed-zones describe istio-io --project="${CP_PROJECT_ID}" &>/dev/null; then
-    log_info "Creating Cloud DNS forwarding zone 'istio-io'..."
+    log_info "Creating Cloud DNS forwarding zone 'istio-io' in project '${CP_PROJECT_ID}'..."
     gcloud dns managed-zones create istio-io \
       --dns-name="istio.io." \
       --description="Forward istio.io to 8.8.8.8" \
       --visibility=private \
-      --networks="${vpc1},${vpc2}" \
+      --networks="${cp_vpc}" \
       --forwarding-targets="8.8.8.8" \
       --project="${CP_PROJECT_ID}"
   else
-    log_info "Cloud DNS zone 'istio-io' already configured."
+    log_info "Cloud DNS zone 'istio-io' in project '${CP_PROJECT_ID}' already configured."
+  fi
+
+  # Ensure DNS forwarding in managed cluster project
+  if ! gcloud dns managed-zones describe istio-io --project="${MANAGED1_PROJECT_ID}" &>/dev/null; then
+    log_info "Creating Cloud DNS forwarding zone 'istio-io' in project '${MANAGED1_PROJECT_ID}'..."
+    gcloud dns managed-zones create istio-io \
+      --dns-name="istio.io." \
+      --description="Forward istio.io to 8.8.8.8" \
+      --visibility=private \
+      --networks="${managed_vpc}" \
+      --forwarding-targets="8.8.8.8" \
+      --project="${MANAGED1_PROJECT_ID}"
+  else
+    log_info "Cloud DNS zone 'istio-io' in project '${MANAGED1_PROJECT_ID}' already configured."
   fi
 }
 
