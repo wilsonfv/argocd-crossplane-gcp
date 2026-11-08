@@ -1,9 +1,13 @@
 #!/usr/bin/env bash
 #
 # Deploy Istio Service Mesh (Ambient Mode) to Multi-Cluster GKE using Argo CD.
-# Deploys to both:
-# 1. Control Plane Cluster (argocd-control-plane)
-# 2. Managed Cluster (gke-managed-cluster)
+# Deploys to all 3 clusters:
+# 1. Control Plane Cluster: 'argocd-control-plane'
+# 2. Managed Cluster 1:     'gke-managed-cluster-1'
+# 3. Managed Cluster 2:     'gke-managed-cluster-2'
+#
+# Syncs from dedicated cluster configurations in:
+# https://github.com/wilsonfv/istio-ambient-config.git
 #
 # Style Guide: Google Shell Style Guide
 # https://google.github.io/styleguide/shellguide.html
@@ -17,8 +21,10 @@ set -o pipefail
 # -----------------------------------------------------------------------------
 readonly DEFAULT_CP_CLUSTER_NAME="argocd-control-plane"
 readonly DEFAULT_CP_LOCATION="europe-west1"
-readonly DEFAULT_MANAGED_CLUSTER_NAME="gke-managed-cluster"
-readonly DEFAULT_MANAGED_LOCATION="europe-west1-b"
+readonly DEFAULT_MANAGED1_CLUSTER_NAME="gke-managed-cluster-1"
+readonly DEFAULT_MANAGED1_LOCATION="europe-west1-b"
+readonly DEFAULT_MANAGED2_CLUSTER_NAME="gke-managed-cluster-2"
+readonly DEFAULT_MANAGED2_LOCATION="europe-west1-b"
 readonly DEFAULT_ARGOCD_NAMESPACE="argocd"
 readonly DEFAULT_ISTIO_NAMESPACE="istio-system"
 readonly DEFAULT_ISTIO_REPO_URL="https://github.com/wilsonfv/istio-ambient-config.git"
@@ -34,11 +40,18 @@ readonly COLOR_NC='\033[0m'
 # Mutable runtime variables
 PROJECT_ID="${PROJECT_ID:-}"
 CP_PROJECT_ID="${CP_PROJECT_ID:-}"
-MANAGED_PROJECT_ID="${MANAGED_PROJECT_ID:-}"
+MANAGED1_PROJECT_ID="${MANAGED1_PROJECT_ID:-}"
+MANAGED2_PROJECT_ID="${MANAGED2_PROJECT_ID:-}"
+
 CP_CLUSTER_NAME="${CP_CLUSTER_NAME:-${DEFAULT_CP_CLUSTER_NAME}}"
 CP_LOCATION="${CP_LOCATION:-${DEFAULT_CP_LOCATION}}"
-MANAGED_CLUSTER_NAME="${MANAGED_CLUSTER_NAME:-${DEFAULT_MANAGED_CLUSTER_NAME}}"
-MANAGED_LOCATION="${MANAGED_LOCATION:-${DEFAULT_MANAGED_LOCATION}}"
+
+MANAGED1_CLUSTER_NAME="${MANAGED1_CLUSTER_NAME:-${MANAGED_CLUSTER_NAME:-${DEFAULT_MANAGED1_CLUSTER_NAME}}}"
+MANAGED1_LOCATION="${MANAGED1_LOCATION:-${MANAGED_LOCATION:-${DEFAULT_MANAGED1_LOCATION}}}"
+
+MANAGED2_CLUSTER_NAME="${MANAGED2_CLUSTER_NAME:-${DEFAULT_MANAGED2_CLUSTER_NAME}}"
+MANAGED2_LOCATION="${MANAGED2_LOCATION:-${DEFAULT_MANAGED2_LOCATION}}"
+
 ARGOCD_NAMESPACE="${ARGOCD_NAMESPACE:-${DEFAULT_ARGOCD_NAMESPACE}}"
 ISTIO_NAMESPACE="${ISTIO_NAMESPACE:-${DEFAULT_ISTIO_NAMESPACE}}"
 ISTIO_REPO_URL="${ISTIO_REPO_URL:-${DEFAULT_ISTIO_REPO_URL}}"
@@ -46,8 +59,6 @@ GITHUB_TOKEN="${GITHUB_TOKEN:-}"
 
 #######################################
 # Print current timestamp in ISO format.
-# Outputs:
-#   Formatted timestamp string (YYYY-MM-DD HH:MM:SS).
 #######################################
 timestamp() {
   date '+%Y-%m-%d %H:%M:%S'
@@ -55,8 +66,6 @@ timestamp() {
 
 #######################################
 # Print an informational message to stdout.
-# Arguments:
-#   Message string.
 #######################################
 log_info() {
   echo -e "[$(timestamp)] ${COLOR_BLUE}[INFO]${COLOR_NC} $*"
@@ -64,8 +73,6 @@ log_info() {
 
 #######################################
 # Print a success message to stdout.
-# Arguments:
-#   Message string.
 #######################################
 log_success() {
   echo -e "[$(timestamp)] ${COLOR_GREEN}[SUCCESS]${COLOR_NC} $*"
@@ -73,8 +80,6 @@ log_success() {
 
 #######################################
 # Print a warning message to stderr.
-# Arguments:
-#   Message string.
 #######################################
 log_warn() {
   echo -e "[$(timestamp)] ${COLOR_YELLOW}[WARN]${COLOR_NC} $*" >&2
@@ -82,8 +87,6 @@ log_warn() {
 
 #######################################
 # Print an error message to stderr.
-# Arguments:
-#   Message string.
 #######################################
 log_error() {
   echo -e "[$(timestamp)] ${COLOR_RED}[ERROR]${COLOR_NC} $*" >&2
@@ -91,8 +94,6 @@ log_error() {
 
 #######################################
 # Retrieve active GCP project ID from gcloud config list.
-# Outputs:
-#   Active project ID from gcloud config, or empty string.
 #######################################
 get_gcloud_config_project() {
   gcloud config list --format='value(core.project)' 2>/dev/null || true
@@ -100,8 +101,6 @@ get_gcloud_config_project() {
 
 #######################################
 # Format location string to corresponding gcloud flag.
-# Arguments:
-#   Location string (e.g. europe-west1 or europe-west1-b)
 #######################################
 format_location_flag() {
   local location="$1"
@@ -114,8 +113,6 @@ format_location_flag() {
 
 #######################################
 # Display help and usage instructions.
-# Arguments:
-#   None.
 #######################################
 usage() {
   local active_project
@@ -125,18 +122,25 @@ usage() {
   cat <<EOF
 Usage: $(basename "$0") [OPTIONS]
 
-Deploys Istio Ambient Mode to Multi-Cluster GKE via Argo CD GitOps manifests:
-  - Control Plane Cluster: '${CP_CLUSTER_NAME}' in '${CP_LOCATION}'
-  - Managed Cluster:       '${MANAGED_CLUSTER_NAME}' in '${MANAGED_LOCATION}'
+Deploys Istio Ambient Mode to 3 GKE clusters via Argo CD GitOps manifests:
+  - Cluster 1 (Control Plane): '${CP_CLUSTER_NAME}' in '${CP_LOCATION}'
+  - Cluster 2 (Managed 1):     '${MANAGED1_CLUSTER_NAME}' in '${MANAGED1_LOCATION}'
+  - Cluster 3 (Managed 2):     '${MANAGED2_CLUSTER_NAME}' in '${MANAGED2_LOCATION}'
 
 Options:
   -p, --project PROJECT_ID          Default GCP Project ID (default: read from 'gcloud config list' -> ${display_project})
   --cp-project PROJECT_ID           Control plane cluster GCP project ID (default: ${CP_PROJECT_ID:-${display_project}})
-  --managed-project PROJECT_ID      Managed cluster GCP project ID (default: ${MANAGED_PROJECT_ID:-${display_project}})
+  --managed1-project PROJECT_ID     Managed cluster 1 GCP project ID (default: ${MANAGED1_PROJECT_ID:-${display_project}})
+  --managed2-project PROJECT_ID     Managed cluster 2 GCP project ID (default: ${MANAGED2_PROJECT_ID:-${display_project}})
+  --managed-project PROJECT_ID      Alias setting project for both managed clusters
+
   --cp-cluster NAME                 Control plane cluster name (default: ${CP_CLUSTER_NAME})
   --cp-location LOCATION            Control plane cluster location (default: ${CP_LOCATION})
-  --managed-cluster NAME            Managed cluster name (default: ${MANAGED_CLUSTER_NAME})
-  --managed-location LOCATION       Managed cluster location (default: ${MANAGED_LOCATION})
+  --managed1-cluster NAME           Managed cluster 1 name (default: ${MANAGED1_CLUSTER_NAME})
+  --managed1-location LOCATION      Managed cluster 1 location (default: ${MANAGED1_LOCATION})
+  --managed2-cluster NAME           Managed cluster 2 name (default: ${MANAGED2_CLUSTER_NAME})
+  --managed2-location LOCATION      Managed cluster 2 location (default: ${MANAGED2_LOCATION})
+
   -c, --cluster CLUSTER_NAME        Alias for --cp-cluster
   -r, --region REGION               Alias for --cp-location
   -z, --zone ZONE                   Overrides --cp-location for zonal clusters
@@ -144,15 +148,14 @@ Options:
   -h, --help                        Show this help message
 
 Environment Variables:
-  PROJECT_ID, CP_CLUSTER_NAME, CP_LOCATION, MANAGED_CLUSTER_NAME, MANAGED_LOCATION,
+  PROJECT_ID, CP_PROJECT_ID, MANAGED1_PROJECT_ID, MANAGED2_PROJECT_ID,
+  CP_CLUSTER_NAME, MANAGED1_CLUSTER_NAME, MANAGED2_CLUSTER_NAME,
   ARGOCD_NAMESPACE, ISTIO_NAMESPACE, GITHUB_TOKEN
 EOF
 }
 
 #######################################
 # Parse command line flags.
-# Arguments:
-#   Command line arguments.
 #######################################
 parse_flags() {
   while [[ $# -gt 0 ]]; do
@@ -166,7 +169,16 @@ parse_flags() {
         shift 2
         ;;
       --managed-project)
-        MANAGED_PROJECT_ID="$2"
+        MANAGED1_PROJECT_ID="$2"
+        MANAGED2_PROJECT_ID="$2"
+        shift 2
+        ;;
+      --managed1-project)
+        MANAGED1_PROJECT_ID="$2"
+        shift 2
+        ;;
+      --managed2-project)
+        MANAGED2_PROJECT_ID="$2"
         shift 2
         ;;
       --cp-cluster)
@@ -177,12 +189,20 @@ parse_flags() {
         CP_LOCATION="$2"
         shift 2
         ;;
-      --managed-cluster)
-        MANAGED_CLUSTER_NAME="$2"
+      --managed1-cluster|--managed-cluster)
+        MANAGED1_CLUSTER_NAME="$2"
         shift 2
         ;;
-      --managed-location)
-        MANAGED_LOCATION="$2"
+      --managed1-location|--managed-location)
+        MANAGED1_LOCATION="$2"
+        shift 2
+        ;;
+      --managed2-cluster)
+        MANAGED2_CLUSTER_NAME="$2"
+        shift 2
+        ;;
+      --managed2-location)
+        MANAGED2_LOCATION="$2"
         shift 2
         ;;
       -c|--cluster)
@@ -216,8 +236,6 @@ parse_flags() {
 
 #######################################
 # Resolve GCP Project ID using gcloud config list, env, or flags.
-# Returns:
-#   0 on success, 1 on failure.
 #######################################
 resolve_project_id() {
   if [[ -z "${PROJECT_ID}" ]]; then
@@ -237,18 +255,17 @@ resolve_project_id() {
   fi
 
   CP_PROJECT_ID="${CP_PROJECT_ID:-${PROJECT_ID}}"
-  MANAGED_PROJECT_ID="${MANAGED_PROJECT_ID:-${PROJECT_ID}}"
+  MANAGED1_PROJECT_ID="${MANAGED1_PROJECT_ID:-${PROJECT_ID}}"
+  MANAGED2_PROJECT_ID="${MANAGED2_PROJECT_ID:-${PROJECT_ID}}"
 
   log_info "Control Plane GCP Project: ${CP_PROJECT_ID}"
-  log_info "Managed Cluster GCP Project: ${MANAGED_PROJECT_ID}"
-  log_info "Ensuring active gcloud project is set to: ${CP_PROJECT_ID}"
+  log_info "Managed Cluster 1 Project: ${MANAGED1_PROJECT_ID}"
+  log_info "Managed Cluster 2 Project: ${MANAGED2_PROJECT_ID}"
   gcloud config set project "${CP_PROJECT_ID}" >/dev/null
 }
 
 #######################################
 # Verify required dependencies and active authentication.
-# Returns:
-#   0 if all checks pass, 1 otherwise.
 #######################################
 check_prerequisites() {
   log_info "Verifying required tools..."
@@ -272,15 +289,13 @@ check_prerequisites() {
 }
 
 #######################################
-# Connect to both GKE clusters and verify credentials.
-# Returns:
-#   0 on success, non-zero on failure.
+# Connect to all 3 GKE clusters and verify credentials.
 #######################################
 connect_clusters() {
-  local cp_loc_flag
+  local cp_loc_flag managed1_loc_flag managed2_loc_flag
   cp_loc_flag="$(format_location_flag "${CP_LOCATION}")"
-  local managed_loc_flag
-  managed_loc_flag="$(format_location_flag "${MANAGED_LOCATION}")"
+  managed1_loc_flag="$(format_location_flag "${MANAGED1_LOCATION}")"
+  managed2_loc_flag="$(format_location_flag "${MANAGED2_LOCATION}")"
 
   log_info "Connecting to Control Plane GKE cluster '${CP_CLUSTER_NAME}' in project '${CP_PROJECT_ID}' (${CP_LOCATION})..."
   if ! gcloud container clusters describe "${CP_CLUSTER_NAME}" "${cp_loc_flag}" --project "${CP_PROJECT_ID}" &>/dev/null; then
@@ -290,26 +305,30 @@ connect_clusters() {
   gcloud container clusters get-credentials "${CP_CLUSTER_NAME}" "${cp_loc_flag}" --project "${CP_PROJECT_ID}"
   log_success "Connected to control plane cluster '${CP_CLUSTER_NAME}'."
 
-  log_info "Connecting to Managed GKE cluster '${MANAGED_CLUSTER_NAME}' in project '${MANAGED_PROJECT_ID}' (${MANAGED_LOCATION})..."
-  if ! gcloud container clusters describe "${MANAGED_CLUSTER_NAME}" "${managed_loc_flag}" --project "${MANAGED_PROJECT_ID}" &>/dev/null; then
-    log_error "Managed cluster '${MANAGED_CLUSTER_NAME}' not found in project ${MANAGED_PROJECT_ID} (${MANAGED_LOCATION})."
+  log_info "Connecting to Managed GKE cluster 1 '${MANAGED1_CLUSTER_NAME}' in project '${MANAGED1_PROJECT_ID}' (${MANAGED1_LOCATION})..."
+  if ! gcloud container clusters describe "${MANAGED1_CLUSTER_NAME}" "${managed1_loc_flag}" --project "${MANAGED1_PROJECT_ID}" &>/dev/null; then
+    log_error "Managed cluster 1 '${MANAGED1_CLUSTER_NAME}' not found in project ${MANAGED1_PROJECT_ID} (${MANAGED1_LOCATION})."
     return 1
   fi
-  gcloud container clusters get-credentials "${MANAGED_CLUSTER_NAME}" "${managed_loc_flag}" --project "${MANAGED_PROJECT_ID}"
-  log_success "Connected to managed cluster '${MANAGED_CLUSTER_NAME}'."
+  gcloud container clusters get-credentials "${MANAGED1_CLUSTER_NAME}" "${managed1_loc_flag}" --project "${MANAGED1_PROJECT_ID}"
+  log_success "Connected to managed cluster 1 '${MANAGED1_CLUSTER_NAME}'."
+
+  log_info "Connecting to Managed GKE cluster 2 '${MANAGED2_CLUSTER_NAME}' in project '${MANAGED2_PROJECT_ID}' (${MANAGED2_LOCATION})..."
+  if ! gcloud container clusters describe "${MANAGED2_CLUSTER_NAME}" "${managed2_loc_flag}" --project "${MANAGED2_PROJECT_ID}" &>/dev/null; then
+    log_error "Managed cluster 2 '${MANAGED2_CLUSTER_NAME}' not found in project ${MANAGED2_PROJECT_ID} (${MANAGED2_LOCATION})."
+    return 1
+  fi
+  gcloud container clusters get-credentials "${MANAGED2_CLUSTER_NAME}" "${managed2_loc_flag}" --project "${MANAGED2_PROJECT_ID}"
+  log_success "Connected to managed cluster 2 '${MANAGED2_CLUSTER_NAME}'."
 }
 
 #######################################
-# Ensure Cloud DNS private forwarding zone exists for istio.io.
+# Ensure Cloud DNS private forwarding zone exists for istio.io across all VPC networks.
 #######################################
 ensure_dns_zone() {
-  log_info "Verifying Cloud DNS zone for istio.io registry access..."
-  local network
-  network="$(gcloud compute networks list --project="${CP_PROJECT_ID}" --format="value(name)" --filter="name ~ internal" --limit=1 2>/dev/null || true)"
-  if [[ -z "${network}" ]]; then
-    network="$(gcloud compute networks list --project="${CP_PROJECT_ID}" --format="value(name)" --limit=1 2>/dev/null || true)"
-  fi
-  network="${network:-default}"
+  log_info "Verifying Cloud DNS zone for istio.io registry access across VPC networks..."
+  local vpc1="mq-usecase-1-internal-vpc1"
+  local vpc2="mq-usecase-1-internal-vpc2"
 
   if ! gcloud dns managed-zones describe istio-io --project="${CP_PROJECT_ID}" &>/dev/null; then
     log_info "Creating Cloud DNS forwarding zone 'istio-io'..."
@@ -317,7 +336,7 @@ ensure_dns_zone() {
       --dns-name="istio.io." \
       --description="Forward istio.io to 8.8.8.8" \
       --visibility=private \
-      --networks="${network}" \
+      --networks="${vpc1},${vpc2}" \
       --forwarding-targets="8.8.8.8" \
       --project="${CP_PROJECT_ID}"
   else
@@ -327,9 +346,6 @@ ensure_dns_zone() {
 
 #######################################
 # Ensure Kubernetes Gateway API CRDs exist on a cluster.
-# Arguments:
-#   Cluster context
-#   Cluster label
 #######################################
 ensure_gateway_api_crds() {
   local context="$1"
@@ -375,17 +391,17 @@ ensure_argocd_repo_secret() {
 }
 
 #######################################
-# Deploy Argo CD Root Applications for both clusters.
+# Deploy Argo CD Root Applications for all 3 clusters.
 #######################################
 deploy_argocd_apps() {
   local cp_context="gke_${CP_PROJECT_ID}_${CP_LOCATION}_${CP_CLUSTER_NAME}"
 
-  log_info "Deploying Argo CD Root Application for Control Plane cluster..."
+  log_info "Deploying Argo CD Root Application for Control Plane ('${CP_CLUSTER_NAME}')..."
   cat <<EOF | kubectl --context="${cp_context}" apply -n "${ARGOCD_NAMESPACE}" -f -
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: istio-ambient-root
+  name: istio-ambient-root-cp
   namespace: ${ARGOCD_NAMESPACE}
   finalizers:
     - resources-finalizer.argocd.argoproj.io
@@ -394,7 +410,7 @@ spec:
   source:
     repoURL: ${ISTIO_REPO_URL}
     targetRevision: HEAD
-    path: argocd/apps
+    path: argocd/clusters/argocd-control-plane
   destination:
     server: https://kubernetes.default.svc
     namespace: ${ARGOCD_NAMESPACE}
@@ -406,14 +422,14 @@ spec:
       - CreateNamespace=true
       - ServerSideApply=true
 EOF
-  log_success "Argo CD Root Application 'istio-ambient-root' applied for Control Plane."
+  log_success "Root Application 'istio-ambient-root-cp' applied."
 
-  log_info "Deploying Argo CD Root Application for Managed cluster '${MANAGED_CLUSTER_NAME}'..."
+  log_info "Deploying Argo CD Root Application for Managed Cluster 1 ('${MANAGED1_CLUSTER_NAME}')..."
   cat <<EOF | kubectl --context="${cp_context}" apply -n "${ARGOCD_NAMESPACE}" -f -
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: istio-ambient-root-managed
+  name: istio-ambient-root-managed-1
   namespace: ${ARGOCD_NAMESPACE}
   finalizers:
     - resources-finalizer.argocd.argoproj.io
@@ -422,7 +438,7 @@ spec:
   source:
     repoURL: ${ISTIO_REPO_URL}
     targetRevision: HEAD
-    path: argocd/apps-managed
+    path: argocd/clusters/gke-managed-cluster-1
   destination:
     server: https://kubernetes.default.svc
     namespace: ${ARGOCD_NAMESPACE}
@@ -434,14 +450,39 @@ spec:
       - CreateNamespace=true
       - ServerSideApply=true
 EOF
-  log_success "Argo CD Root Application 'istio-ambient-root-managed' applied for Managed cluster."
+  log_success "Root Application 'istio-ambient-root-managed-1' applied."
+
+  log_info "Deploying Argo CD Root Application for Managed Cluster 2 ('${MANAGED2_CLUSTER_NAME}')..."
+  cat <<EOF | kubectl --context="${cp_context}" apply -n "${ARGOCD_NAMESPACE}" -f -
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: istio-ambient-root-managed-2
+  namespace: ${ARGOCD_NAMESPACE}
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: ${ISTIO_REPO_URL}
+    targetRevision: HEAD
+    path: argocd/clusters/gke-managed-cluster-2
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: ${ARGOCD_NAMESPACE}
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+EOF
+  log_success "Root Application 'istio-ambient-root-managed-2' applied."
 }
 
 #######################################
 # Wait for Istio Ambient Mode components to roll out on a cluster.
-# Arguments:
-#   Cluster context
-#   Cluster name
 #######################################
 wait_for_rollouts_cluster() {
   local ctx="$1"
@@ -470,9 +511,6 @@ wait_for_rollouts_cluster() {
 
 #######################################
 # Wait for sample workload to roll out on a cluster.
-# Arguments:
-#   Cluster context
-#   Cluster name
 #######################################
 wait_for_sample_workload() {
   local ctx="$1"
@@ -495,9 +533,6 @@ wait_for_sample_workload() {
 
 #######################################
 # Test transparent mTLS & L7 ambient traffic on a cluster.
-# Arguments:
-#   Cluster context
-#   Cluster name
 #######################################
 validate_ambient_traffic() {
   local ctx="$1"
@@ -518,19 +553,22 @@ validate_ambient_traffic() {
 #######################################
 print_summary() {
   local cp_context="gke_${CP_PROJECT_ID}_${CP_LOCATION}_${CP_CLUSTER_NAME}"
-  local managed_context="gke_${MANAGED_PROJECT_ID}_${MANAGED_LOCATION}_${MANAGED_CLUSTER_NAME}"
+  local managed1_context="gke_${MANAGED1_PROJECT_ID}_${MANAGED1_LOCATION}_${MANAGED1_CLUSTER_NAME}"
+  local managed2_context="gke_${MANAGED2_PROJECT_ID}_${MANAGED2_LOCATION}_${MANAGED2_CLUSTER_NAME}"
 
   echo ""
   echo -e "${COLOR_GREEN}=====================================================================${COLOR_NC}"
-  echo -e "${COLOR_GREEN}   Multi-Cluster Istio Ambient Mode Deployed via Argo CD Complete    ${COLOR_NC}"
+  echo -e "${COLOR_GREEN}   3-Cluster Istio Ambient Mode Deployed via Argo CD Complete        ${COLOR_NC}"
   echo -e "${COLOR_GREEN}=====================================================================${COLOR_NC}"
   echo -e "${COLOR_BOLD}Control Plane Project:${COLOR_NC}        ${CP_PROJECT_ID}"
-  echo -e "${COLOR_BOLD}Managed Cluster Project:${COLOR_NC}      ${MANAGED_PROJECT_ID}"
+  echo -e "${COLOR_BOLD}Managed 1 Project:${COLOR_NC}            ${MANAGED1_PROJECT_ID}"
+  echo -e "${COLOR_BOLD}Managed 2 Project:${COLOR_NC}            ${MANAGED2_PROJECT_ID}"
   echo -e "${COLOR_BOLD}Istio Namespace:${COLOR_NC}              ${ISTIO_NAMESPACE}"
   echo -e "${COLOR_BOLD}Argo CD Namespace:${COLOR_NC}            ${ARGOCD_NAMESPACE}"
   echo ""
   echo -e "${COLOR_BOLD}Cluster 1 (Control Plane):${COLOR_NC}    ${CP_CLUSTER_NAME} (${CP_LOCATION})"
-  echo -e "${COLOR_BOLD}Cluster 2 (Managed):${COLOR_NC}          ${MANAGED_CLUSTER_NAME} (${MANAGED_LOCATION})"
+  echo -e "${COLOR_BOLD}Cluster 2 (Managed 1):${COLOR_NC}        ${MANAGED1_CLUSTER_NAME} (${MANAGED1_LOCATION})"
+  echo -e "${COLOR_BOLD}Cluster 3 (Managed 2):${COLOR_NC}        ${MANAGED2_CLUSTER_NAME} (${MANAGED2_LOCATION})"
   echo ""
   echo -e "${COLOR_BOLD}Argo CD Applications Status:${COLOR_NC}"
   kubectl --context="${cp_context}" get applications.argoproj.io -n "${ARGOCD_NAMESPACE}"
@@ -541,24 +579,30 @@ print_summary() {
   echo -e "${COLOR_BOLD}[Cluster 1: ${CP_CLUSTER_NAME}] apps-ambient Pods:${COLOR_NC}"
   kubectl --context="${cp_context}" get pods -n apps-ambient -o wide
   echo ""
-  echo -e "${COLOR_BOLD}[Cluster 2: ${MANAGED_CLUSTER_NAME}] istio-system Pods:${COLOR_NC}"
-  kubectl --context="${managed_context}" get pods -n "${ISTIO_NAMESPACE}" -o wide
+  echo -e "${COLOR_BOLD}[Cluster 2: ${MANAGED1_CLUSTER_NAME}] istio-system Pods:${COLOR_NC}"
+  kubectl --context="${managed1_context}" get pods -n "${ISTIO_NAMESPACE}" -o wide
   echo ""
-  echo -e "${COLOR_BOLD}[Cluster 2: ${MANAGED_CLUSTER_NAME}] apps-ambient Pods:${COLOR_NC}"
-  kubectl --context="${managed_context}" get pods -n apps-ambient -o wide
+  echo -e "${COLOR_BOLD}[Cluster 2: ${MANAGED1_CLUSTER_NAME}] apps-ambient Pods:${COLOR_NC}"
+  kubectl --context="${managed1_context}" get pods -n apps-ambient -o wide
   echo ""
-  echo -e "${COLOR_BOLD}Validate Ambient Traffic Command:${COLOR_NC}"
+  echo -e "${COLOR_BOLD}[Cluster 3: ${MANAGED2_CLUSTER_NAME}] istio-system Pods:${COLOR_NC}"
+  kubectl --context="${managed2_context}" get pods -n "${ISTIO_NAMESPACE}" -o wide
+  echo ""
+  echo -e "${COLOR_BOLD}[Cluster 3: ${MANAGED2_CLUSTER_NAME}] apps-ambient Pods:${COLOR_NC}"
+  kubectl --context="${managed2_context}" get pods -n apps-ambient -o wide
+  echo ""
+  echo -e "${COLOR_BOLD}Validate Ambient Traffic Commands:${COLOR_NC}"
   echo "  # Control Plane Cluster:"
   echo "  kubectl --context ${cp_context} exec -n apps-ambient deployment/sleep-client -- curl -s http://echo-server/"
-  echo "  # Managed Cluster:"
-  echo "  kubectl --context ${managed_context} exec -n apps-ambient deployment/sleep-client -- curl -s http://echo-server/"
+  echo "  # Managed Cluster 1:"
+  echo "  kubectl --context ${managed1_context} exec -n apps-ambient deployment/sleep-client -- curl -s http://echo-server/"
+  echo "  # Managed Cluster 2:"
+  echo "  kubectl --context ${managed2_context} exec -n apps-ambient deployment/sleep-client -- curl -s http://echo-server/"
   echo -e "${COLOR_GREEN}=====================================================================${COLOR_NC}"
 }
 
 #######################################
 # Main entry point.
-# Arguments:
-#   Command line arguments.
 #######################################
 main() {
   parse_flags "$@"
@@ -566,28 +610,33 @@ main() {
   connect_clusters
 
   local cp_context="gke_${CP_PROJECT_ID}_${CP_LOCATION}_${CP_CLUSTER_NAME}"
-  local managed_context="gke_${MANAGED_PROJECT_ID}_${MANAGED_LOCATION}_${MANAGED_CLUSTER_NAME}"
+  local managed1_context="gke_${MANAGED1_PROJECT_ID}_${MANAGED1_LOCATION}_${MANAGED1_CLUSTER_NAME}"
+  local managed2_context="gke_${MANAGED2_PROJECT_ID}_${MANAGED2_LOCATION}_${MANAGED2_CLUSTER_NAME}"
 
   ensure_dns_zone
 
-  # Ensure Gateway API CRDs on both clusters
+  # Ensure Gateway API CRDs on all 3 clusters
   ensure_gateway_api_crds "${cp_context}" "${CP_CLUSTER_NAME}"
-  ensure_gateway_api_crds "${managed_context}" "${MANAGED_CLUSTER_NAME}"
+  ensure_gateway_api_crds "${managed1_context}" "${MANAGED1_CLUSTER_NAME}"
+  ensure_gateway_api_crds "${managed2_context}" "${MANAGED2_CLUSTER_NAME}"
 
   ensure_argocd_repo_secret
   deploy_argocd_apps
 
-  # Wait for Istio Ambient components
+  # Wait for Istio Ambient components on all 3 clusters
   wait_for_rollouts_cluster "${cp_context}" "${CP_CLUSTER_NAME}"
-  wait_for_rollouts_cluster "${managed_context}" "${MANAGED_CLUSTER_NAME}"
+  wait_for_rollouts_cluster "${managed1_context}" "${MANAGED1_CLUSTER_NAME}"
+  wait_for_rollouts_cluster "${managed2_context}" "${MANAGED2_CLUSTER_NAME}"
 
-  # Wait for sample workloads
+  # Wait for sample workloads on all 3 clusters
   wait_for_sample_workload "${cp_context}" "${CP_CLUSTER_NAME}"
-  wait_for_sample_workload "${managed_context}" "${MANAGED_CLUSTER_NAME}"
+  wait_for_sample_workload "${managed1_context}" "${MANAGED1_CLUSTER_NAME}"
+  wait_for_sample_workload "${managed2_context}" "${MANAGED2_CLUSTER_NAME}"
 
-  # Validate transparent mTLS traffic
+  # Validate transparent mTLS traffic on all 3 clusters
   validate_ambient_traffic "${cp_context}" "${CP_CLUSTER_NAME}"
-  validate_ambient_traffic "${managed_context}" "${MANAGED_CLUSTER_NAME}"
+  validate_ambient_traffic "${managed1_context}" "${MANAGED1_CLUSTER_NAME}"
+  validate_ambient_traffic "${managed2_context}" "${MANAGED2_CLUSTER_NAME}"
 
   print_summary
 }
