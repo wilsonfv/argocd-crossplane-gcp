@@ -21,7 +21,7 @@ set -o pipefail
 # -----------------------------------------------------------------------------
 readonly DEFAULT_CP_CLUSTER_NAME="argocd-control-plane"
 readonly DEFAULT_CP_LOCATION="europe-west1"
-readonly DEFAULT_MANAGED1_CLUSTER_NAME="gke-managed-cluster-1"
+readonly DEFAULT_MANAGED1_CLUSTER_NAME="gke-managed-cluster"
 readonly DEFAULT_MANAGED1_LOCATION="europe-west1-b"
 readonly DEFAULT_MANAGED2_CLUSTER_NAME="gke-managed-cluster-2"
 readonly DEFAULT_MANAGED2_LOCATION="europe-west1-b"
@@ -351,8 +351,18 @@ ensure_gateway_api_crds() {
   local context="$1"
   local cluster_name="$2"
 
-  log_info "[${cluster_name}] Ensuring Kubernetes Gateway API CRDs..."
-  kubectl --context="${context}" apply -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.2.0/standard-install.yaml >/dev/null
+  if kubectl --context="${context}" get crd gateways.gateway.networking.k8s.io &>/dev/null; then
+    log_info "[${cluster_name}] Kubernetes Gateway API CRDs already present."
+    return 0
+  fi
+
+  log_info "[${cluster_name}] Installing Kubernetes Gateway API CRDs..."
+  local url="https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.2.0/standard-install.yaml"
+  local tmp_file="/tmp/gateway-api-standard.yaml"
+  if [[ ! -s "${tmp_file}" ]]; then
+    curl -fsSL --retry 5 --retry-delay 2 "${url}" -o "${tmp_file}"
+  fi
+  kubectl --context="${context}" apply -f "${tmp_file}" >/dev/null
   log_success "[${cluster_name}] Gateway API CRDs installed."
 }
 
@@ -396,6 +406,10 @@ ensure_argocd_repo_secret() {
 deploy_argocd_apps() {
   local cp_context="gke_${CP_PROJECT_ID}_${CP_LOCATION}_${CP_CLUSTER_NAME}"
 
+  # Remove deprecated monolithic root applications if present
+  kubectl --context="${cp_context}" -n "${ARGOCD_NAMESPACE}" delete application \
+    istio-ambient-root istio-ambient-root-managed --cascade=orphan 2>/dev/null || true
+
   log_info "Deploying Argo CD Root Application for Control Plane ('${CP_CLUSTER_NAME}')..."
   cat <<EOF | kubectl --context="${cp_context}" apply -n "${ARGOCD_NAMESPACE}" -f -
 apiVersion: argoproj.io/v1alpha1
@@ -410,7 +424,7 @@ spec:
   source:
     repoURL: ${ISTIO_REPO_URL}
     targetRevision: HEAD
-    path: argocd/clusters/argocd-control-plane
+    path: argocd/clusters/${CP_CLUSTER_NAME}
   destination:
     server: https://kubernetes.default.svc
     namespace: ${ARGOCD_NAMESPACE}
@@ -438,7 +452,7 @@ spec:
   source:
     repoURL: ${ISTIO_REPO_URL}
     targetRevision: HEAD
-    path: argocd/clusters/gke-managed-cluster-1
+    path: argocd/clusters/${MANAGED1_CLUSTER_NAME}
   destination:
     server: https://kubernetes.default.svc
     namespace: ${ARGOCD_NAMESPACE}
@@ -466,7 +480,7 @@ spec:
   source:
     repoURL: ${ISTIO_REPO_URL}
     targetRevision: HEAD
-    path: argocd/clusters/gke-managed-cluster-2
+    path: argocd/clusters/${MANAGED2_CLUSTER_NAME}
   destination:
     server: https://kubernetes.default.svc
     namespace: ${ARGOCD_NAMESPACE}

@@ -30,7 +30,7 @@ readonly DEFAULT_CP_VPC="mq-usecase-1-internal-vpc1"
 readonly DEFAULT_CP_SUBNET="internal-vpc1-europe-west1-gke"
 
 # Cluster 2 (Managed 1)
-readonly DEFAULT_MANAGED1_CLUSTER_NAME="gke-managed-cluster-1"
+readonly DEFAULT_MANAGED1_CLUSTER_NAME="gke-managed-cluster"
 readonly DEFAULT_MANAGED1_LOCATION="europe-west1-b"
 readonly DEFAULT_MANAGED1_VPC="mq-usecase-1-internal-vpc1"
 readonly DEFAULT_MANAGED1_SUBNET="internal-vpc1-europe-west1-gke2"
@@ -608,6 +608,7 @@ print_summary() {
   local managed2_context="gke_${MANAGED2_PROJECT_ID}_${MANAGED2_LOCATION}_${MANAGED2_CLUSTER_NAME}"
   local gsa_email="${ARGOCD_GSA_NAME}@${CP_PROJECT_ID}.iam.gserviceaccount.com"
 
+  kubectl config set-context "${cp_context}" --namespace="${ARGOCD_NAMESPACE}" >/dev/null
   kubectl config use-context "${cp_context}" >/dev/null
   local admin_password
   admin_password="$(kubectl -n "${ARGOCD_NAMESPACE}" get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" 2>/dev/null | base64 -d 2>/dev/null || echo "[password already rotated or not yet generated]")"
