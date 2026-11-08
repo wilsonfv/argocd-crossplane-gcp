@@ -32,6 +32,7 @@ readonly DEFAULT_SERVICE_RANGE="gke-service"
 readonly DEFAULT_MACHINE_TYPE="e2-standard-4"
 readonly DEFAULT_NUM_NODES="1"
 readonly DEFAULT_ARGOCD_NAMESPACE="argocd"
+readonly DEFAULT_ARGOCD_GSA_NAME="argocd-cluster-manager"
 
 # Terminal colors
 readonly COLOR_RED='\033[0;31m'
@@ -57,6 +58,7 @@ SERVICE_RANGE="${SERVICE_RANGE:-${DEFAULT_SERVICE_RANGE}}"
 MACHINE_TYPE="${MACHINE_TYPE:-${DEFAULT_MACHINE_TYPE}}"
 NUM_NODES="${NUM_NODES:-${DEFAULT_NUM_NODES}}"
 ARGOCD_NAMESPACE="${ARGOCD_NAMESPACE:-${DEFAULT_ARGOCD_NAMESPACE}}"
+ARGOCD_GSA_NAME="${ARGOCD_GSA_NAME:-${DEFAULT_ARGOCD_GSA_NAME}}"
 DELETE_CLUSTERS="${DELETE_CLUSTERS:-false}"
 AUTO_APPROVE="${AUTO_APPROVE:-false}"
 
@@ -127,6 +129,7 @@ Options:
   --cp-subnet SUBNET           Control plane subnet name (default: ${CP_SUBNET})
   --managed-cluster NAME       Managed cluster name (default: ${MANAGED_CLUSTER_NAME})
   --managed-subnet SUBNET      Managed subnet name (default: ${MANAGED_SUBNET})
+  --gsa-name NAME              GCP Service Account name for Workload Identity (default: ${ARGOCD_GSA_NAME})
   -m, --machine-type TYPE      GKE node machine type (default: ${MACHINE_TYPE})
   -n, --num-nodes NUM          Nodes per zone (default: ${NUM_NODES})
   -d, --delete                 Delete both GKE clusters
@@ -174,6 +177,10 @@ parse_flags() {
         ;;
       --managed-subnet)
         MANAGED_SUBNET="$2"
+        shift 2
+        ;;
+      --gsa-name)
+        ARGOCD_GSA_NAME="$2"
         shift 2
         ;;
       -m|--machine-type)
@@ -312,6 +319,7 @@ launch_cluster_creation() {
     --cluster-secondary-range-name "${POD_RANGE}" \
     --services-secondary-range-name "${SERVICE_RANGE}" \
     --enable-ip-alias \
+    --workload-pool="${PROJECT_ID}.svc.id.goog" \
     --num-nodes "${NUM_NODES}" \
     --machine-type "${MACHINE_TYPE}" \
     --release-channel "regular" \
@@ -390,29 +398,111 @@ install_argocd_control_plane() {
 }
 
 #######################################
-# Register the managed cluster into the Argo CD control plane.
+# Setup GCP Workload Identity for Argo CD to access managed clusters.
+#######################################
+setup_workload_identity_for_argocd() {
+  local cp_context="gke_${PROJECT_ID}_${CP_LOCATION}_${CP_CLUSTER_NAME}"
+  local managed_context="gke_${PROJECT_ID}_${MANAGED_LOCATION}_${MANAGED_CLUSTER_NAME}"
+  local gsa_email="${ARGOCD_GSA_NAME}@${PROJECT_ID}.iam.gserviceaccount.com"
+
+  log_info "Configuring GCP Workload Identity for Argo CD (${gsa_email})..."
+
+  # 1. Create Google Cloud Service Account (GSA) if needed
+  if ! gcloud iam service-accounts describe "${gsa_email}" --project="${PROJECT_ID}" &>/dev/null; then
+    log_info "Creating GCP Service Account '${gsa_email}'..."
+    gcloud iam service-accounts create "${ARGOCD_GSA_NAME}" \
+      --project="${PROJECT_ID}" \
+      --display-name="Argo CD Cluster Manager Workload Identity"
+  else
+    log_info "GCP Service Account '${gsa_email}' already exists."
+  fi
+
+  # 2. Grant project-level container permissions to GSA so it can access GKE clusters
+  log_info "Granting 'roles/container.developer' to '${gsa_email}' on project '${PROJECT_ID}'..."
+  gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
+    --member="serviceAccount:${gsa_email}" \
+    --role="roles/container.developer" \
+    --quiet >/dev/null
+
+  # 3. Bind Kubernetes SAs in Argo CD namespace to GSA via roles/iam.workloadIdentityUser
+  local ksa
+  for ksa in argocd-application-controller argocd-server; do
+    log_info "Binding KSA '${ksa}' to GSA '${gsa_email}' via Workload Identity..."
+    gcloud iam service-accounts add-iam-policy-binding "${gsa_email}" \
+      --project="${PROJECT_ID}" \
+      --role="roles/iam.workloadIdentityUser" \
+      --member="serviceAccount:${PROJECT_ID}.svc.id.goog[${ARGOCD_NAMESPACE}/${ksa}]" \
+      --quiet >/dev/null
+
+    kubectl --context="${cp_context}" -n "${ARGOCD_NAMESPACE}" annotate serviceaccount "${ksa}" \
+      "iam.gke.io/gcp-service-account=${gsa_email}" --overwrite >/dev/null
+  done
+
+  # 4. Grant GSA cluster-admin RBAC on the managed cluster
+  log_info "Granting cluster-admin RBAC to '${gsa_email}' on managed cluster '${MANAGED_CLUSTER_NAME}'..."
+  kubectl --context="${managed_context}" create clusterrolebinding argocd-workload-identity-admin \
+    --clusterrole=cluster-admin \
+    --user="${gsa_email}" \
+    --dry-run=client -o yaml | kubectl --context="${managed_context}" apply -f - >/dev/null
+
+  # 5. Restart Argo CD controller and server to mount Workload Identity tokens
+  log_info "Restarting Argo CD workloads to activate Workload Identity tokens..."
+  kubectl --context="${cp_context}" -n "${ARGOCD_NAMESPACE}" rollout restart statefulset/argocd-application-controller >/dev/null
+  kubectl --context="${cp_context}" -n "${ARGOCD_NAMESPACE}" rollout restart deployment/argocd-server >/dev/null
+  kubectl --context="${cp_context}" -n "${ARGOCD_NAMESPACE}" rollout status statefulset/argocd-application-controller --timeout=180s
+  kubectl --context="${cp_context}" -n "${ARGOCD_NAMESPACE}" rollout status deployment/argocd-server --timeout=180s
+  log_success "GCP Workload Identity configured successfully for Argo CD."
+}
+
+#######################################
+# Register the managed cluster into Argo CD using GCP Workload Identity execProviderConfig.
 #######################################
 register_managed_cluster() {
   local cp_context="gke_${PROJECT_ID}_${CP_LOCATION}_${CP_CLUSTER_NAME}"
-  local managed_context="gke_${PROJECT_ID}_${MANAGED_LOCATION}_${MANAGED_CLUSTER_NAME}"
+  local managed_loc_flag
+  managed_loc_flag="$(format_location_flag "${MANAGED_LOCATION}")"
 
-  log_info "Registering managed cluster '${MANAGED_CLUSTER_NAME}' into Argo CD..."
+  log_info "Registering managed cluster '${MANAGED_CLUSTER_NAME}' into Argo CD via GCP Workload Identity..."
 
-  # Set default namespace for control plane context to argocd
-  kubectl config set-context "${cp_context}" --namespace="${ARGOCD_NAMESPACE}" >/dev/null
-  kubectl config use-context "${cp_context}" >/dev/null
+  # Fetch endpoint and CA certificate from GKE
+  local endpoint ca_cert
+  endpoint="$(gcloud container clusters describe "${MANAGED_CLUSTER_NAME}" "${managed_loc_flag}" --project="${PROJECT_ID}" --format="value(endpoint)")"
+  ca_cert="$(gcloud container clusters describe "${MANAGED_CLUSTER_NAME}" "${managed_loc_flag}" --project="${PROJECT_ID}" --format="value(masterAuth.clusterCaCertificate)")"
 
-  # Register using argocd CLI direct kube-context mode (--core)
-  log_info "Executing 'argocd cluster add' for context: ${managed_context}..."
-  argocd cluster add "${managed_context}" \
-    --name "${MANAGED_CLUSTER_NAME}" \
-    --kube-context "${cp_context}" \
-    --core \
-    --yes \
-    --upsert \
-    --loglevel debug
+  # Clean up any legacy or duplicate cluster secret for this cluster
+  kubectl --context="${cp_context}" -n "${ARGOCD_NAMESPACE}" delete secret \
+    -l "argocd.argoproj.io/secret-type=cluster" \
+    --field-selector "metadata.name!=cluster-kubernetes.default.svc" 2>/dev/null || true
 
-  log_success "Managed cluster '${MANAGED_CLUSTER_NAME}' successfully registered into Argo CD."
+  # Create Argo CD cluster secret configured with execProviderConfig (argocd-k8s-auth gcp)
+  log_info "Creating Argo CD cluster secret with execProviderConfig (argocd-k8s-auth gcp)..."
+  cat <<EOF | kubectl --context="${cp_context}" apply -f -
+apiVersion: v1
+kind: Secret
+metadata:
+  name: cluster-${MANAGED_CLUSTER_NAME}
+  namespace: ${ARGOCD_NAMESPACE}
+  labels:
+    argocd.argoproj.io/secret-type: cluster
+type: Opaque
+stringData:
+  name: ${MANAGED_CLUSTER_NAME}
+  server: https://${endpoint}
+  config: |
+    {
+      "execProviderConfig": {
+        "command": "argocd-k8s-auth",
+        "args": ["gcp"],
+        "apiVersion": "client.authentication.k8s.io/v1beta1"
+      },
+      "tlsClientConfig": {
+        "insecure": false,
+        "caData": "${ca_cert}"
+      }
+    }
+EOF
+
+  log_success "Managed cluster '${MANAGED_CLUSTER_NAME}' successfully registered into Argo CD using GCP Workload Identity."
 }
 
 #######################################
@@ -526,7 +616,8 @@ main() {
   log_info "Phase 4: Deploying Argo CD to control plane cluster..."
   install_argocd_control_plane
 
-  log_info "Phase 5: Registering managed cluster into Argo CD..."
+  log_info "Phase 5: Configuring Workload Identity and registering managed cluster into Argo CD..."
+  setup_workload_identity_for_argocd
   register_managed_cluster
 
   print_summary

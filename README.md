@@ -47,10 +47,17 @@ Automated scripts and declarative GitOps source-of-truth configurations followin
 | `--cp-subnet` | `CP_SUBNET` | `internal-vpc1-europe-west1-gke` | Control plane subnet |
 | `--managed-cluster`| `MANAGED_CLUSTER_NAME`| `gke-managed-cluster` | Managed GKE cluster name |
 | `--managed-subnet` | `MANAGED_SUBNET` | `internal-vpc1-europe-west1-gke2`| Managed cluster subnet |
+| `--gsa-name` | `ARGOCD_GSA_NAME` | `argocd-cluster-manager` | GCP Service Account for Workload Identity |
 | `-m`, `--machine-type` | `MACHINE_TYPE` | `e2-standard-4` | Node machine type |
 | `-n`, `--num-nodes` | `NUM_NODES` | `1` | Nodes per zone |
 | `-d`, `--delete` | `DELETE_CLUSTERS` | `false` | Delete both GKE clusters |
 | `-y`, `--yes` | `AUTO_APPROVE` | `false` | Auto-approve deletion prompt |
+
+### GCP Workload Identity for Managed Cluster Access
+The managed cluster is registered into Argo CD using **GCP Workload Identity** with an `execProviderConfig` cluster secret:
+- GKE clusters are provisioned with `--workload-pool="${PROJECT_ID}.svc.id.goog"`.
+- A Google Cloud Service Account (`argocd-cluster-manager@<PROJECT_ID>.iam.gserviceaccount.com`) is granted `roles/container.developer` and bound to Argo CD's Kubernetes ServiceAccounts (`argocd-application-controller` and `argocd-server`) via `roles/iam.workloadIdentityUser`.
+- The managed cluster secret in Argo CD uses `execProviderConfig` executing `argocd-k8s-auth gcp` to mint short-lived tokens dynamically, eliminating the need to store static bearer tokens or credentials.
 
 - Access UI: `kubectl config use-context gke_${PROJECT_ID}_europe-west1_argocd-control-plane && kubectl port-forward svc/argocd-server -n argocd 8080:443` -> [https://localhost:8080](https://localhost:8080)
 - Username: `admin`
