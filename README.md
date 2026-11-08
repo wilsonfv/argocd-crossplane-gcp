@@ -8,13 +8,9 @@ Automated scripts and declarative GitOps source-of-truth configurations followin
 
 ```text
 .
-├── setup-multicluster.sh      # Provisions multi-cluster GKE & configures Argo CD control plane
+├── setup-multicluster.sh      # Provisions 3-cluster GKE & configures Argo CD via Workload Identity
 ├── install-crossplane.sh      # Installs latest Crossplane on GKE via Helm
-├── deploy-istio-ambient.sh    # Deploys Istio Ambient Mode via Argo CD from private repo
-├── gitops/                    # GitOps Source of Truth
-│   └── gke/                   # Declarative GKE infrastructure & platform configs
-│       ├── cluster-spec.yaml  # GKE Cluster definition & node configuration
-│       └── namespaces.yaml    # Platform namespaces (crossplane-system, argocd)
+├── deploy-istio-ambient.sh    # Deploys Istio Ambient Mode across all 3 clusters via Argo CD
 └── README.md
 ```
 
