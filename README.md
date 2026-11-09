@@ -121,9 +121,16 @@ Argo CD on the control plane cluster is managed declaratively by Argo CD itself 
 - Reconciles and self-heals all Argo CD controllers, server deployments, CRDs, and RBAC policies.
 - Protects runtime cluster secrets and initial credentials via `ignoreDifferences` and non-destructive sync policies.
 
-To deploy Istio Ambient mesh to all 3 clusters:
+To deploy Istio Ambient mesh across all 6 clusters (2 control planes + 4 managed clusters):
 ```bash
-./deploy-istio-ambient.sh
+# Deploy to all 6 clusters across both environments (default)
+./deploy-istio-ambient.sh --all
+
+# Or deploy to Environment 1 only (Full Control Plane + 2 Managed Clusters)
+./deploy-istio-ambient.sh --full
+
+# Or deploy to Environment 2 only (Headless Control Plane + 2 Managed Clusters)
+./deploy-istio-ambient.sh --headless
 ```
 
 Or pass your GitHub PAT explicitly if not detected:
@@ -131,19 +138,28 @@ Or pass your GitHub PAT explicitly if not detected:
 ./deploy-istio-ambient.sh --token <GITHUB_PAT>
 ```
 
-### Validate Ambient Mode Traffic Across All 3 Clusters
+### Validate Ambient Mode Traffic Across All 6 Clusters
 Workloads in the `apps-ambient` namespace have the label `istio.io/dataplane-mode: ambient`.
 
 Send a test HTTP request from the sleep client to the echo server on each cluster:
 ```bash
-# Control plane cluster (mq-usecase-1):
+# Environment 1 — Control Plane (mq-usecase-1, VPC1):
 kubectl --context gke_mq-usecase-1_europe-west1_argocd-control-plane exec -n apps-ambient deployment/sleep-client -- curl -s http://echo-server/
 
-# Managed cluster 1 (mq-usecase-2):
+# Environment 1 — Managed 1 (mq-usecase-2, VPC1, subnet 1):
 kubectl --context gke_mq-usecase-2_europe-west1-b_gke-managed-cluster exec -n apps-ambient deployment/sleep-client -- curl -s http://echo-server/
 
-# Managed cluster 2 (mq-usecase-2):
+# Environment 1 — Managed 2 (mq-usecase-2, VPC1, subnet 2):
 kubectl --context gke_mq-usecase-2_europe-west1-b_gke-managed-cluster-2 exec -n apps-ambient deployment/sleep-client -- curl -s http://echo-server/
+
+# Environment 2 — Headless Control Plane (mq-usecase-1, VPC2):
+kubectl --context gke_mq-usecase-1_europe-west1_argocd-control-plane-headless exec -n apps-ambient deployment/sleep-client -- curl -s http://echo-server/
+
+# Environment 2 — Managed 3 (mq-usecase-2, VPC2, subnet 1):
+kubectl --context gke_mq-usecase-2_europe-west1-b_gke-managed-cluster-3 exec -n apps-ambient deployment/sleep-client -- curl -s http://echo-server/
+
+# Environment 2 — Managed 4 (mq-usecase-2, VPC2, subnet 2):
+kubectl --context gke_mq-usecase-2_europe-west1-b_gke-managed-cluster-4 exec -n apps-ambient deployment/sleep-client -- curl -s http://echo-server/
 ```
 
 Inspect `ztunnel` logs to verify transparent mTLS proxying:
