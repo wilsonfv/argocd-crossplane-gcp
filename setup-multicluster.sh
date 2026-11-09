@@ -9,8 +9,8 @@
 #
 # Environment 2 (Headless Argo CD Core Control Plane):
 #   - Headless CP:   'argocd-control-plane-headless' in GCP 'mq-usecase-1', VPC 'mq-usecase-1-internal-vpc2', subnet 'internal-vpc2-europe-west1-gke'
-#   - Managed 1:     'gke-managed-vpc2-1' in GCP 'mq-usecase-2', VPC 'mq-usecase-2-internal-vpc2', subnet 'internal-vpc2-europe-west1-gke'
-#   - Managed 2:     'gke-managed-vpc2-2' in GCP 'mq-usecase-2', VPC 'mq-usecase-2-internal-vpc2', subnet 'internal-vpc2-europe-west1-gke2'
+#   - Managed 1:     'gke-managed-cluster-3' in GCP 'mq-usecase-2', VPC 'mq-usecase-2-internal-vpc2', subnet 'internal-vpc2-europe-west1-gke'
+#   - Managed 2:     'gke-managed-cluster-4' in GCP 'mq-usecase-2', VPC 'mq-usecase-2-internal-vpc2', subnet 'internal-vpc2-europe-west1-gke2'
 #
 # Style Guide: Google Shell Style Guide
 # https://google.github.io/styleguide/shellguide.html
@@ -63,11 +63,11 @@ readonly DEFAULT_ENV2_CP_SUBNET="internal-vpc2-europe-west1-gke"
 readonly DEFAULT_ENV2_MANAGED_PROJECT_ID="mq-usecase-2"
 readonly DEFAULT_ENV2_MANAGED_VPC="mq-usecase-2-internal-vpc2"
 
-readonly DEFAULT_ENV2_MANAGED1_CLUSTER_NAME="gke-managed-vpc2-1"
+readonly DEFAULT_ENV2_MANAGED1_CLUSTER_NAME="gke-managed-cluster-3"
 readonly DEFAULT_ENV2_MANAGED1_LOCATION="europe-west1-b"
 readonly DEFAULT_ENV2_MANAGED1_SUBNET="internal-vpc2-europe-west1-gke"
 
-readonly DEFAULT_ENV2_MANAGED2_CLUSTER_NAME="gke-managed-vpc2-2"
+readonly DEFAULT_ENV2_MANAGED2_CLUSTER_NAME="gke-managed-cluster-4"
 readonly DEFAULT_ENV2_MANAGED2_LOCATION="europe-west1-b"
 readonly DEFAULT_ENV2_MANAGED2_SUBNET="internal-vpc2-europe-west1-gke2"
 
@@ -151,8 +151,8 @@ Environment 1 (Full Control Plane + 2 Managed Clusters in VPC1):
 
 Environment 2 (Headless Control Plane + 2 Managed Clusters in VPC2):
   - Headless CP:   'argocd-control-plane-headless' in 'mq-usecase-1', VPC 'mq-usecase-1-internal-vpc2', subnet 'internal-vpc2-europe-west1-gke'
-  - Managed 1:     'gke-managed-vpc2-1' in 'mq-usecase-2', VPC 'mq-usecase-2-internal-vpc2', subnet 'internal-vpc2-europe-west1-gke'
-  - Managed 2:     'gke-managed-vpc2-2' in 'mq-usecase-2', VPC 'mq-usecase-2-internal-vpc2', subnet 'internal-vpc2-europe-west1-gke2'
+  - Managed 1:     'gke-managed-cluster-3' in 'mq-usecase-2', VPC 'mq-usecase-2-internal-vpc2', subnet 'internal-vpc2-europe-west1-gke'
+  - Managed 2:     'gke-managed-cluster-4' in 'mq-usecase-2', VPC 'mq-usecase-2-internal-vpc2', subnet 'internal-vpc2-europe-west1-gke2'
 
 Options:
   --all                       Provision both environments (all 6 clusters, default)

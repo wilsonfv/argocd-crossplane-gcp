@@ -51,8 +51,8 @@ Automated scripts and declarative GitOps source-of-truth configurations followin
 #### Environment 2: Headless Argo CD Core Control Plane (VPC2)
 1. **Headless Control Plane**: `argocd-control-plane-headless` in GCP `mq-usecase-1`, VPC `mq-usecase-1-internal-vpc2`, subnet `internal-vpc2-europe-west1-gke` (`europe-west1`).
    - Mode: **Argo CD Core (headless mode) only** (`core-install.yaml` — controller, repo-server, redis, applicationset-controller, no UI/API server).
-2. **New Managed Cluster 1**: `gke-managed-vpc2-1` in GCP `mq-usecase-2`, VPC `mq-usecase-2-internal-vpc2`, subnet `internal-vpc2-europe-west1-gke` (`europe-west1-b`).
-3. **New Managed Cluster 2**: `gke-managed-vpc2-2` in GCP `mq-usecase-2`, VPC `mq-usecase-2-internal-vpc2`, subnet `internal-vpc2-europe-west1-gke2` (`europe-west1-b`).
+2. **New Managed Cluster 1**: `gke-managed-cluster-3` in GCP `mq-usecase-2`, VPC `mq-usecase-2-internal-vpc2`, subnet `internal-vpc2-europe-west1-gke` (`europe-west1-b`).
+3. **New Managed Cluster 2**: `gke-managed-cluster-4` in GCP `mq-usecase-2`, VPC `mq-usecase-2-internal-vpc2`, subnet `internal-vpc2-europe-west1-gke2` (`europe-west1-b`).
    - Both new managed clusters registered into `argocd-control-plane-headless` using GCP Workload Identity with `execProviderConfig` (`argocd-k8s-auth gcp`).
 
 ### Options
