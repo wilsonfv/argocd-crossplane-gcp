@@ -22,48 +22,48 @@ Automated scripts and declarative GitOps source-of-truth configurations followin
 
 ---
 
-## 1. Deploy or Delete 3-Cluster GKE & Argo CD
+## 1. Deploy or Delete Multi-Cluster GKE & Argo CD
 
 ```bash
-# Provision all 3 GKE clusters, deploy Argo CD, and register both managed clusters
-./setup-multicluster.sh
+# Provision both environments (all 6 clusters, default)
+./setup-multicluster.sh --all
 
-# Delete all 3 GKE clusters (with confirmation prompt)
+# Provision only Environment 1 (Full Control Plane + 2 Managed Clusters)
+./setup-multicluster.sh --full
+
+# Provision only Environment 2 (Headless Argo CD Core Control Plane + 2 Managed Clusters)
+./setup-multicluster.sh --headless
+
+# Delete clusters for the selected environment
 ./setup-multicluster.sh --delete
-
-# Delete all 3 GKE clusters non-interactively
 ./setup-multicluster.sh --delete --yes
 ```
 
-### 3-Cluster Architecture
-1. **Cluster 1 (Control Plane)**: `argocd-control-plane` in GCP Project `mq-usecase-1`, VPC `mq-usecase-1-internal-vpc1`, subnet `internal-vpc1-europe-west1-gke` (`europe-west1`).
-2. **Cluster 2 (Managed 1)**: `gke-managed-cluster` in GCP Project `mq-usecase-2`, VPC `mq-usecase-2-internal-vpc1`, subnet `internal-vpc1-europe-west1-gke` (`europe-west1-b`).
-3. **Cluster 3 (Managed 2)**: `gke-managed-cluster-2` in GCP Project `mq-usecase-2`, VPC `mq-usecase-2-internal-vpc1`, subnet `internal-vpc1-europe-west1-gke2` (`europe-west1-b`).
+### Dual-Topology Architecture
+
+#### Environment 1: Full Argo CD Control Plane (VPC1)
+1. **Control Plane**: `argocd-control-plane` in GCP `mq-usecase-1`, VPC `mq-usecase-1-internal-vpc1`, subnet `internal-vpc1-europe-west1-gke` (`europe-west1`).
+   - Mode: **Full Argo CD installation** (Web UI, API server, controller, repo-server, dex, redis).
+2. **Managed Cluster 1**: `gke-managed-cluster` in GCP `mq-usecase-2`, VPC `mq-usecase-2-internal-vpc1`, subnet `internal-vpc1-europe-west1-gke` (`europe-west1-b`).
+3. **Managed Cluster 2**: `gke-managed-cluster-2` in GCP `mq-usecase-2`, VPC `mq-usecase-2-internal-vpc1`, subnet `internal-vpc1-europe-west1-gke2` (`europe-west1-b`).
+   - Both managed clusters registered into `argocd-control-plane` using GCP Workload Identity with `execProviderConfig` (`argocd-k8s-auth gcp`).
+
+#### Environment 2: Headless Argo CD Core Control Plane (VPC2)
+1. **Headless Control Plane**: `argocd-control-plane-headless` in GCP `mq-usecase-1`, VPC `mq-usecase-1-internal-vpc2`, subnet `internal-vpc2-europe-west1-gke` (`europe-west1`).
+   - Mode: **Argo CD Core (headless mode) only** (`core-install.yaml` — controller, repo-server, redis, applicationset-controller, no UI/API server).
+2. **New Managed Cluster 1**: `gke-managed-vpc2-1` in GCP `mq-usecase-2`, VPC `mq-usecase-2-internal-vpc2`, subnet `internal-vpc2-europe-west1-gke` (`europe-west1-b`).
+3. **New Managed Cluster 2**: `gke-managed-vpc2-2` in GCP `mq-usecase-2`, VPC `mq-usecase-2-internal-vpc2`, subnet `internal-vpc2-europe-west1-gke2` (`europe-west1-b`).
+   - Both new managed clusters registered into `argocd-control-plane-headless` using GCP Workload Identity with `execProviderConfig` (`argocd-k8s-auth gcp`).
 
 ### Options
 | Option | Env Var | Default | Description |
 |---|---|---|---|
-| `-p`, `--project` | `PROJECT_ID` | `gcloud config list` | Default GCP Project ID (dynamically detected) |
-| `--cp-project` | `CP_PROJECT_ID` | `mq-usecase-1` | Control plane cluster GCP project ID |
-| `--managed1-project` | `MANAGED1_PROJECT_ID` | `mq-usecase-2` | Managed cluster 1 GCP project ID |
-| `--managed2-project` | `MANAGED2_PROJECT_ID` | `mq-usecase-2` | Managed cluster 2 GCP project ID |
-| `--managed-project` | `MANAGED_PROJECT_ID` | `mq-usecase-2` | Sets both managed cluster project IDs |
-| `--cp-cluster` | `CP_CLUSTER_NAME` | `argocd-control-plane` | Control plane GKE cluster name |
-| `--cp-location` | `CP_LOCATION` | `europe-west1` | Control plane location |
-| `--cp-network` | `CP_VPC_NETWORK` | `mq-usecase-1-internal-vpc1` | Control plane VPC network |
-| `--cp-subnet` | `CP_SUBNET` | `internal-vpc1-europe-west1-gke` | Control plane subnet |
-| `--managed1-cluster`| `MANAGED1_CLUSTER_NAME`| `gke-managed-cluster` | Managed GKE cluster 1 name |
-| `--managed1-location`| `MANAGED1_LOCATION`| `europe-west1-b` | Managed GKE cluster 1 location |
-| `--managed1-network` | `MANAGED1_VPC_NETWORK` | `mq-usecase-2-internal-vpc1` | Managed cluster 1 VPC network |
-| `--managed1-subnet` | `MANAGED1_SUBNET` | `internal-vpc1-europe-west1-gke` | Managed cluster 1 subnet |
-| `--managed2-cluster`| `MANAGED2_CLUSTER_NAME`| `gke-managed-cluster-2`| Managed GKE cluster 2 name |
-| `--managed2-location`| `MANAGED2_LOCATION`| `europe-west1-b` | Managed GKE cluster 2 location |
-| `--managed2-network` | `MANAGED2_VPC_NETWORK` | `mq-usecase-2-internal-vpc1` | Managed cluster 2 VPC network |
-| `--managed2-subnet` | `MANAGED2_SUBNET` | `internal-vpc1-europe-west1-gke2`| Managed cluster 2 subnet |
-| `--gsa-name` | `ARGOCD_GSA_NAME` | `argocd-cluster-manager` | GCP Service Account for Workload Identity |
+| `--all` | `SETUP_TARGET=all` | `all` | Provision both environments (all 6 clusters) |
+| `--full` | `SETUP_TARGET=full` | | Provision only Environment 1 (Full Control Plane + 2 Managed Clusters) |
+| `--headless`, `--core` | `SETUP_TARGET=headless` | | Provision only Environment 2 (Headless Core Control Plane + 2 Managed Clusters) |
 | `-m`, `--machine-type` | `MACHINE_TYPE` | `e2-standard-4` | Node machine type |
 | `-n`, `--num-nodes` | `NUM_NODES` | `1` | Nodes per zone |
-| `-d`, `--delete` | `DELETE_CLUSTERS` | `false` | Delete all 3 GKE clusters |
+| `-d`, `--delete` | `DELETE_CLUSTERS` | `false` | Delete clusters for the selected target |
 | `-y`, `--yes` | `AUTO_APPROVE` | `false` | Auto-approve deletion prompt |
 
 ### GCP Workload Identity for Managed Cluster Access
