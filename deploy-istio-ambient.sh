@@ -576,11 +576,26 @@ main() {
   check_prerequisites
   ensure_dns_zones
 
-  if [[ "${DEPLOY_TARGET}" == "all" || "${DEPLOY_TARGET}" == "full" ]]; then
-    deploy_environment_1
-  fi
+  if [[ "${DEPLOY_TARGET}" == "all" ]]; then
+    log_info "Initiating parallel deployment for Environment 1 and Environment 2 at the same time..."
+    deploy_environment_1 &
+    local dep1_pid=$!
 
-  if [[ "${DEPLOY_TARGET}" == "all" || "${DEPLOY_TARGET}" == "headless" ]]; then
+    deploy_environment_2 &
+    local dep2_pid=$!
+
+    local fail=0
+    wait "${dep1_pid}" || fail=1
+    wait "${dep2_pid}" || fail=1
+
+    if [[ "${fail}" -ne 0 ]]; then
+      log_error "One or more parallel ambient deployments failed."
+      return 1
+    fi
+    log_success "Both Environment 1 and Environment 2 ambient deployments completed successfully in parallel."
+  elif [[ "${DEPLOY_TARGET}" == "full" ]]; then
+    deploy_environment_1
+  elif [[ "${DEPLOY_TARGET}" == "headless" ]]; then
     deploy_environment_2
   fi
 

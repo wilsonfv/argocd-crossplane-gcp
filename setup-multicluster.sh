@@ -129,6 +129,25 @@ log_error() {
 }
 
 #######################################
+# Retry a command with exponential/jitter backoff.
+#######################################
+retry_cmd() {
+  local max_attempts=5
+  local delay=2
+  local attempt=1
+  while true; do
+    if "$@"; then
+      return 0
+    fi
+    if (( attempt >= max_attempts )); then
+      return 1
+    fi
+    sleep "$(( delay + RANDOM % 3 ))"
+    (( attempt++ ))
+  done
+}
+
+#######################################
 # Retrieve active GCP project ID.
 #######################################
 get_gcloud_config_project() {
@@ -343,21 +362,21 @@ install_argocd_full_control_plane() {
   local cp_context="gke_${DEFAULT_ENV1_CP_PROJECT_ID}_${DEFAULT_ENV1_CP_LOCATION}_${DEFAULT_ENV1_CP_CLUSTER_NAME}"
 
   log_info "Deploying Full Argo CD on control plane: ${cp_context}..."
-  kubectl config use-context "${cp_context}"
+  kubectl config set-context "${cp_context}" --namespace="${ARGOCD_NAMESPACE}" >/dev/null 2>&1 || true
 
-  if kubectl get deployment/argocd-server -n "${ARGOCD_NAMESPACE}" &>/dev/null; then
-    log_info "Argo CD server already exists in '${ARGOCD_NAMESPACE}'. Checking health..."
+  if kubectl --context="${cp_context}" get deployment/argocd-server -n "${ARGOCD_NAMESPACE}" &>/dev/null; then
+    log_info "Argo CD server already exists in '${ARGOCD_NAMESPACE}' on '${cp_context}'. Checking health..."
   else
-    kubectl create namespace "${ARGOCD_NAMESPACE}" --dry-run=client -o yaml | kubectl apply -f -
+    kubectl --context="${cp_context}" create namespace "${ARGOCD_NAMESPACE}" --dry-run=client -o yaml | kubectl --context="${cp_context}" apply -f -
     local manifest_url="https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml"
-    kubectl apply --server-side --force-conflicts -n "${ARGOCD_NAMESPACE}" -f "${manifest_url}"
+    kubectl --context="${cp_context}" apply --server-side --force-conflicts -n "${ARGOCD_NAMESPACE}" -f "${manifest_url}"
   fi
 
-  log_info "Waiting for Full Argo CD components rollout..."
-  kubectl rollout status deployment/argocd-server -n "${ARGOCD_NAMESPACE}" --timeout=300s
-  kubectl rollout status deployment/argocd-repo-server -n "${ARGOCD_NAMESPACE}" --timeout=300s
-  kubectl rollout status deployment/argocd-applicationset-controller -n "${ARGOCD_NAMESPACE}" --timeout=300s
-  log_success "Full Argo CD control plane is operational."
+  log_info "Waiting for Full Argo CD components rollout on '${cp_context}'..."
+  kubectl --context="${cp_context}" rollout status deployment/argocd-server -n "${ARGOCD_NAMESPACE}" --timeout=300s
+  kubectl --context="${cp_context}" rollout status deployment/argocd-repo-server -n "${ARGOCD_NAMESPACE}" --timeout=300s
+  kubectl --context="${cp_context}" rollout status deployment/argocd-applicationset-controller -n "${ARGOCD_NAMESPACE}" --timeout=300s
+  log_success "Full Argo CD control plane is operational on '${cp_context}'."
 }
 
 #######################################
@@ -367,21 +386,44 @@ install_argocd_core_control_plane() {
   local cp_context="gke_${DEFAULT_ENV2_CP_PROJECT_ID}_${DEFAULT_ENV2_CP_LOCATION}_${DEFAULT_ENV2_CP_CLUSTER_NAME}"
 
   log_info "Deploying Headless Argo CD Core on control plane: ${cp_context}..."
-  kubectl config use-context "${cp_context}"
+  kubectl config set-context "${cp_context}" --namespace="${ARGOCD_NAMESPACE}" >/dev/null 2>&1 || true
 
-  if kubectl get statefulset/argocd-application-controller -n "${ARGOCD_NAMESPACE}" &>/dev/null; then
-    log_info "Argo CD Core already deployed in '${ARGOCD_NAMESPACE}'. Checking health..."
+  if kubectl --context="${cp_context}" get statefulset/argocd-application-controller -n "${ARGOCD_NAMESPACE}" &>/dev/null; then
+    log_info "Argo CD Core already deployed in '${ARGOCD_NAMESPACE}' on '${cp_context}'. Checking health..."
   else
-    kubectl create namespace "${ARGOCD_NAMESPACE}" --dry-run=client -o yaml | kubectl apply -f -
+    kubectl --context="${cp_context}" create namespace "${ARGOCD_NAMESPACE}" --dry-run=client -o yaml | kubectl --context="${cp_context}" apply -f -
     local core_url="https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/core-install.yaml"
-    kubectl apply --server-side --force-conflicts -n "${ARGOCD_NAMESPACE}" -f "${core_url}"
+    kubectl --context="${cp_context}" apply --server-side --force-conflicts -n "${ARGOCD_NAMESPACE}" -f "${core_url}"
   fi
 
-  log_info "Waiting for Argo CD Core components rollout..."
-  kubectl rollout status deployment/argocd-repo-server -n "${ARGOCD_NAMESPACE}" --timeout=300s
-  kubectl rollout status deployment/argocd-applicationset-controller -n "${ARGOCD_NAMESPACE}" --timeout=300s
-  kubectl rollout status statefulset/argocd-application-controller -n "${ARGOCD_NAMESPACE}" --timeout=300s
-  log_success "Headless Argo CD Core control plane is operational."
+  log_info "Waiting for Argo CD Core components rollout on '${cp_context}'..."
+  kubectl --context="${cp_context}" rollout status deployment/argocd-repo-server -n "${ARGOCD_NAMESPACE}" --timeout=300s
+  kubectl --context="${cp_context}" rollout status deployment/argocd-applicationset-controller -n "${ARGOCD_NAMESPACE}" --timeout=300s
+  kubectl --context="${cp_context}" rollout status statefulset/argocd-application-controller -n "${ARGOCD_NAMESPACE}" --timeout=300s
+  log_success "Headless Argo CD Core control plane is operational on '${cp_context}'."
+}
+
+#######################################
+# Ensure shared GSA and project-level IAM bindings are initialized.
+#######################################
+ensure_shared_gsa() {
+  local gsa_email="${ARGOCD_GSA_NAME}@${DEFAULT_ENV1_CP_PROJECT_ID}.iam.gserviceaccount.com"
+  log_info "Ensuring shared GSA '${gsa_email}' is initialized..."
+
+  if ! gcloud iam service-accounts describe "${gsa_email}" --project="${DEFAULT_ENV1_CP_PROJECT_ID}" &>/dev/null; then
+    log_info "Creating GSA '${gsa_email}' in project '${DEFAULT_ENV1_CP_PROJECT_ID}'..."
+    gcloud iam service-accounts create "${ARGOCD_GSA_NAME}" \
+      --project="${DEFAULT_ENV1_CP_PROJECT_ID}" \
+      --display-name="Argo CD Cluster Manager Workload Identity"
+  fi
+
+  local role
+  for role in roles/container.developer roles/container.clusterViewer; do
+    retry_cmd gcloud projects add-iam-policy-binding "${DEFAULT_ENV1_MANAGED_PROJECT_ID}" \
+      --member="serviceAccount:${gsa_email}" \
+      --role="${role}" \
+      --quiet >/dev/null
+  done
 }
 
 #######################################
@@ -397,24 +439,7 @@ setup_workload_identity() {
 
   log_info "Configuring GCP Workload Identity for ${cp_context}..."
 
-  # 1. Create GSA in mq-usecase-1 if not existing
-  if ! gcloud iam service-accounts describe "${gsa_email}" --project="${DEFAULT_ENV1_CP_PROJECT_ID}" &>/dev/null; then
-    log_info "Creating GSA '${gsa_email}' in project '${DEFAULT_ENV1_CP_PROJECT_ID}'..."
-    gcloud iam service-accounts create "${ARGOCD_GSA_NAME}" \
-      --project="${DEFAULT_ENV1_CP_PROJECT_ID}" \
-      --display-name="Argo CD Cluster Manager Workload Identity"
-  fi
-
-  # 2. Grant roles in target managed projects
-  local role
-  for role in roles/container.developer roles/container.clusterViewer; do
-    gcloud projects add-iam-policy-binding "${DEFAULT_ENV1_MANAGED_PROJECT_ID}" \
-      --member="serviceAccount:${gsa_email}" \
-      --role="${role}" \
-      --quiet >/dev/null
-  done
-
-  # 3. Bind KSA to GSA
+  # Bind KSA to GSA
   local ksas=("argocd-application-controller")
   if [[ "${is_full}" == "true" ]]; then
     ksas+=("argocd-server")
@@ -422,7 +447,7 @@ setup_workload_identity() {
 
   local ksa
   for ksa in "${ksas[@]}"; do
-    gcloud iam service-accounts add-iam-policy-binding "${gsa_email}" \
+    retry_cmd gcloud iam service-accounts add-iam-policy-binding "${gsa_email}" \
       --project="${DEFAULT_ENV1_CP_PROJECT_ID}" \
       --role="roles/iam.workloadIdentityUser" \
       --member="serviceAccount:${DEFAULT_ENV1_CP_PROJECT_ID}.svc.id.goog[${ARGOCD_NAMESPACE}/${ksa}]" \
@@ -432,7 +457,7 @@ setup_workload_identity() {
       "iam.gke.io/gcp-service-account=${gsa_email}" --overwrite >/dev/null
   done
 
-  # 4. Restart controller to activate Workload Identity
+  # Restart controller to activate Workload Identity
   kubectl --context="${cp_context}" -n "${ARGOCD_NAMESPACE}" rollout restart statefulset/argocd-application-controller >/dev/null
   if [[ "${is_full}" == "true" ]]; then
     kubectl --context="${cp_context}" -n "${ARGOCD_NAMESPACE}" rollout restart deployment/argocd-server >/dev/null
@@ -601,6 +626,7 @@ print_summary() {
     echo "  Managed 1:      ${DEFAULT_ENV1_MANAGED1_CLUSTER_NAME} (${DEFAULT_ENV1_MANAGED1_LOCATION}, ${DEFAULT_ENV1_MANAGED_PROJECT_ID}, subnet: ${DEFAULT_ENV1_MANAGED1_SUBNET})"
     echo "  Managed 2:      ${DEFAULT_ENV1_MANAGED2_CLUSTER_NAME} (${DEFAULT_ENV1_MANAGED2_LOCATION}, ${DEFAULT_ENV1_MANAGED_PROJECT_ID}, subnet: ${DEFAULT_ENV1_MANAGED2_SUBNET})"
     echo "  Registered Clusters in Environment 1:"
+    kubectl config set-context "${env1_cp_ctx}" --namespace="${ARGOCD_NAMESPACE}" >/dev/null 2>&1 || true
     argocd cluster list --core --kube-context "${env1_cp_ctx}" 2>/dev/null || true
     echo ""
   fi
@@ -609,9 +635,10 @@ print_summary() {
     echo -e "${COLOR_BOLD}▶ ENVIRONMENT 2: Headless Argo CD Core Control Plane (VPC2)${COLOR_NC}"
     echo "  Headless CP:    ${DEFAULT_ENV2_CP_CLUSTER_NAME} (${DEFAULT_ENV2_CP_LOCATION}, ${DEFAULT_ENV2_CP_PROJECT_ID}, ${DEFAULT_ENV2_CP_VPC})"
     echo "  Installation:   Argo CD Core (no API server / no UI)"
-    echo "  Managed 1:      ${DEFAULT_ENV2_MANAGED1_CLUSTER_NAME} (${DEFAULT_ENV2_MANAGED1_LOCATION}, ${DEFAULT_ENV2_MANAGED_PROJECT_ID}, subnet: ${DEFAULT_ENV2_MANAGED1_SUBNET})"
-    echo "  Managed 2:      ${DEFAULT_ENV2_MANAGED2_CLUSTER_NAME} (${DEFAULT_ENV2_MANAGED2_LOCATION}, ${DEFAULT_ENV2_MANAGED_PROJECT_ID}, subnet: ${DEFAULT_ENV2_MANAGED2_SUBNET})"
+    echo "  Managed 3:      ${DEFAULT_ENV2_MANAGED1_CLUSTER_NAME} (${DEFAULT_ENV2_MANAGED1_LOCATION}, ${DEFAULT_ENV2_MANAGED_PROJECT_ID}, subnet: ${DEFAULT_ENV2_MANAGED1_SUBNET})"
+    echo "  Managed 4:      ${DEFAULT_ENV2_MANAGED2_CLUSTER_NAME} (${DEFAULT_ENV2_MANAGED2_LOCATION}, ${DEFAULT_ENV2_MANAGED_PROJECT_ID}, subnet: ${DEFAULT_ENV2_MANAGED2_SUBNET})"
     echo "  Registered Clusters in Environment 2:"
+    kubectl config set-context "${env2_cp_ctx}" --namespace="${ARGOCD_NAMESPACE}" >/dev/null 2>&1 || true
     argocd cluster list --core --kube-context "${env2_cp_ctx}" 2>/dev/null || true
     echo ""
   fi
@@ -696,11 +723,28 @@ main() {
     return 0
   fi
 
-  if [[ "${SETUP_TARGET}" == "all" || "${SETUP_TARGET}" == "full" ]]; then
-    setup_environment_1
-  fi
+  ensure_shared_gsa
 
-  if [[ "${SETUP_TARGET}" == "all" || "${SETUP_TARGET}" == "headless" ]]; then
+  if [[ "${SETUP_TARGET}" == "all" ]]; then
+    log_info "Initiating parallel setup for Environment 1 and Environment 2 at the same time..."
+    setup_environment_1 &
+    local env1_pid=$!
+
+    setup_environment_2 &
+    local env2_pid=$!
+
+    local fail=0
+    wait "${env1_pid}" || fail=1
+    wait "${env2_pid}" || fail=1
+
+    if [[ "${fail}" -ne 0 ]]; then
+      log_error "One or more parallel setup environments failed."
+      return 1
+    fi
+    log_success "Both Environment 1 and Environment 2 setups completed successfully in parallel."
+  elif [[ "${SETUP_TARGET}" == "full" ]]; then
+    setup_environment_1
+  elif [[ "${SETUP_TARGET}" == "headless" ]]; then
     setup_environment_2
   fi
 
