@@ -468,19 +468,34 @@ setup_workload_identity() {
 }
 
 #######################################
-# Grant cluster-admin RBAC on a managed cluster to the GSA.
+# Grant namespace-level admin RBAC on a managed cluster to the GSA.
 # Arguments:
 #   Managed cluster context
+#   Optional: target namespaces (defaults to "default", "istio-system", "apps-ambient")
 #######################################
 grant_managed_rbac() {
   local managed_context="$1"
+  shift || true
   local gsa_email="${ARGOCD_GSA_NAME}@${DEFAULT_ENV1_CP_PROJECT_ID}.iam.gserviceaccount.com"
+  local namespaces=("$@")
+  if [[ ${#namespaces[@]} -eq 0 ]]; then
+    namespaces=("default" "istio-system" "apps-ambient")
+  fi
 
-  log_info "Granting cluster-admin RBAC to GSA on ${managed_context}..."
-  kubectl --context="${managed_context}" create clusterrolebinding argocd-workload-identity-admin \
-    --clusterrole=cluster-admin \
-    --user="${gsa_email}" \
-    --dry-run=client -o yaml | kubectl --context="${managed_context}" apply -f - >/dev/null
+  log_info "Granting namespace-level admin RBAC to GSA on ${managed_context} (namespaces: ${namespaces[*]})..."
+
+  # Remove cluster-wide clusterrolebinding if previously created
+  kubectl --context="${managed_context}" delete clusterrolebinding argocd-workload-identity-admin --ignore-not-found >/dev/null 2>&1 || true
+
+  local ns
+  for ns in "${namespaces[@]}"; do
+    kubectl --context="${managed_context}" create namespace "${ns}" --dry-run=client -o yaml | kubectl --context="${managed_context}" apply -f - >/dev/null
+    kubectl --context="${managed_context}" create rolebinding argocd-workload-identity-admin \
+      --clusterrole=admin \
+      --user="${gsa_email}" \
+      --namespace="${ns}" \
+      --dry-run=client -o yaml | kubectl --context="${managed_context}" apply -f - >/dev/null
+  done
 }
 
 #######################################
