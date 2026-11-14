@@ -582,7 +582,16 @@ EOF
 #######################################
 configure_argocd_webhook() {
   local cp_context="$1"
+  local reserved_address_name="${2:-argocd-cp1-webhook-ip}"
   log_info "Exposing public webhook service and configuring secret on ${cp_context}..."
+
+  local reserved_ip
+  reserved_ip="$(gcloud compute addresses describe "${reserved_address_name}" --region="europe-west1" --project="${DEFAULT_ENV1_CP_PROJECT_ID}" --format="value(address)" 2>/dev/null || true)"
+
+  local lb_ip_field=""
+  if [[ -n "${reserved_ip}" ]]; then
+    lb_ip_field="  loadBalancerIP: ${reserved_ip}"
+  fi
 
   cat <<EOF | kubectl --context="${cp_context}" -n "${ARGOCD_NAMESPACE}" apply -f - >/dev/null
 apiVersion: v1
@@ -594,6 +603,7 @@ metadata:
     networking.gke.io/load-balancer-type: "External"
 spec:
   type: LoadBalancer
+${lb_ip_field}
   selector:
     app.kubernetes.io/name: argocd-server
   ports:
@@ -640,7 +650,7 @@ setup_environment_1() {
   fetch_cluster_credentials "${DEFAULT_ENV1_MANAGED2_CLUSTER_NAME}" "${DEFAULT_ENV1_MANAGED2_LOCATION}" "${DEFAULT_ENV1_MANAGED_PROJECT_ID}"
 
   install_argocd_full_control_plane
-  configure_argocd_webhook "${cp_ctx}"
+  configure_argocd_webhook "${cp_ctx}" "argocd-cp1-webhook-ip"
   setup_workload_identity "${cp_ctx}" "true"
 
   grant_managed_rbac "${m1_ctx}"
@@ -677,7 +687,7 @@ setup_environment_2() {
   fetch_cluster_credentials "${DEFAULT_ENV2_MANAGED2_CLUSTER_NAME}" "${DEFAULT_ENV2_MANAGED2_LOCATION}" "${DEFAULT_ENV2_MANAGED_PROJECT_ID}"
 
   install_argocd_core_control_plane
-  configure_argocd_webhook "${cp_ctx}"
+  configure_argocd_webhook "${cp_ctx}" "argocd-cp2-webhook-ip"
   setup_workload_identity "${cp_ctx}" "false"
 
   grant_managed_rbac "${m1_ctx}"

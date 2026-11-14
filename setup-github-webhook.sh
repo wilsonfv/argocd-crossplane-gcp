@@ -86,10 +86,26 @@ get_webhook_secret() {
   echo "${secret}"
 }
 
+get_reserved_address_ip() {
+  local name="$1"
+  local project_id="${DEFAULT_PROJECT_ID}"
+  gcloud compute addresses describe "${name}" --region="europe-west1" --project="${project_id}" --format="value(address)" 2>/dev/null || true
+}
+
 get_public_ip() {
   local context="$1"
-  local ip
-  ip="$(kubectl --context="${context}" -n "${DEFAULT_ARGOCD_NAMESPACE}" get svc argocd-server-webhook -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || true)"
+  local address_name="$2"
+  local ip=""
+
+  # 1. Check if cluster service already has an ingress IP
+  if timeout 2s kubectl --context="${context}" get svc argocd-server-webhook -n "${DEFAULT_ARGOCD_NAMESPACE}" &>/dev/null; then
+    ip="$(timeout 2s kubectl --context="${context}" -n "${DEFAULT_ARGOCD_NAMESPACE}" get svc argocd-server-webhook -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || true)"
+  fi
+
+  # 2. If not, use reserved static IP from GCP project
+  if [[ -z "${ip}" ]]; then
+    ip="$(get_reserved_address_ip "${address_name}")"
+  fi
   echo "${ip}"
 }
 
@@ -177,37 +193,33 @@ main() {
   log_info "Loaded GitHub webhook secret from GCP Secret Manager (project: ${DEFAULT_PROJECT_ID})."
 
   # 1. Update cluster secrets if clusters are accessible
-  if kubectl --context="${DEFAULT_ENV1_CP_CONTEXT}" --request-timeout=5s get ns "${DEFAULT_ARGOCD_NAMESPACE}" &>/dev/null; then
+  if timeout 2s kubectl --context="${DEFAULT_ENV1_CP_CONTEXT}" get ns "${DEFAULT_ARGOCD_NAMESPACE}" &>/dev/null; then
     ensure_webhook_secret_in_cluster "${DEFAULT_ENV1_CP_CONTEXT}" "${webhook_secret}"
   fi
 
-  if kubectl --context="${DEFAULT_ENV2_CP_CONTEXT}" --request-timeout=5s get ns "${DEFAULT_ARGOCD_NAMESPACE}" &>/dev/null; then
+  if timeout 2s kubectl --context="${DEFAULT_ENV2_CP_CONTEXT}" get ns "${DEFAULT_ARGOCD_NAMESPACE}" &>/dev/null; then
     ensure_webhook_secret_in_cluster "${DEFAULT_ENV2_CP_CONTEXT}" "${webhook_secret}"
   fi
 
-  # 2. Get Public IPs
-  local cp1_ip=""
-  if kubectl --context="${DEFAULT_ENV1_CP_CONTEXT}" --request-timeout=5s get svc argocd-server-webhook -n "${DEFAULT_ARGOCD_NAMESPACE}" &>/dev/null; then
-    cp1_ip="$(get_public_ip "${DEFAULT_ENV1_CP_CONTEXT}")"
-  fi
-  local cp2_ip=""
-  if kubectl --context="${DEFAULT_ENV2_CP_CONTEXT}" --request-timeout=5s get svc argocd-server-webhook -n "${DEFAULT_ARGOCD_NAMESPACE}" &>/dev/null; then
-    cp2_ip="$(get_public_ip "${DEFAULT_ENV2_CP_CONTEXT}")"
-  fi
+  # 2. Get Public IPs (from active LoadBalancer or reserved GCP static addresses)
+  local cp1_ip
+  cp1_ip="$(get_public_ip "${DEFAULT_ENV1_CP_CONTEXT}" "argocd-cp1-webhook-ip")"
+  local cp2_ip
+  cp2_ip="$(get_public_ip "${DEFAULT_ENV2_CP_CONTEXT}" "argocd-cp2-webhook-ip")"
 
   local webhook_urls=()
   if [[ -n "${cp1_ip}" ]]; then
     webhook_urls+=("http://${cp1_ip}/api/webhook")
     log_info "Environment 1 Webhook URL: http://${cp1_ip}/api/webhook"
   else
-    log_warn "Environment 1 public IP not available yet (LoadBalancer pending or cluster not running)."
+    log_warn "Environment 1 public IP not available yet."
   fi
 
   if [[ -n "${cp2_ip}" ]]; then
     webhook_urls+=("http://${cp2_ip}/api/webhook")
     log_info "Environment 2 Webhook URL: http://${cp2_ip}/api/webhook"
   else
-    log_warn "Environment 2 public IP not available yet (LoadBalancer pending or cluster not running)."
+    log_warn "Environment 2 public IP not available yet."
   fi
 
   # 3. Register webhooks for all repositories
