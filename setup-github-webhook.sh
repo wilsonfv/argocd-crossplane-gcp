@@ -129,12 +129,15 @@ create_or_update_repo_webhook() {
 
   log_info "Configuring webhook for ${org}/${repo} -> ${webhook_url}..."
 
-  # Check existing hooks
+  # Check existing hooks (matching either http or https for the same endpoint)
   local existing_hooks
   existing_hooks="$(curl -s -H "Authorization: token ${token}" "https://api.github.com/repos/${org}/${repo}/hooks")"
 
+  local target_host_path="${webhook_url#https://}"
+  target_host_path="${target_host_path#http://}"
+
   local hook_id
-  hook_id="$(echo "${existing_hooks}" | jq -r ".[] | select(.config.url == \"${webhook_url}\") | .id" 2>/dev/null || true)"
+  hook_id="$(echo "${existing_hooks}" | jq -r ".[] | select(.config.url | contains(\"${target_host_path}\")) | .id" 2>/dev/null || true)"
 
   if [[ -n "${hook_id}" && "${hook_id}" != "null" ]]; then
     log_info "Webhook ${hook_id} already exists on ${org}/${repo}. Updating..."
@@ -209,15 +212,15 @@ main() {
 
   local webhook_urls=()
   if [[ -n "${cp1_ip}" ]]; then
-    webhook_urls+=("http://${cp1_ip}/api/webhook")
-    log_info "Environment 1 Webhook URL: http://${cp1_ip}/api/webhook"
+    webhook_urls+=("https://${cp1_ip}/api/webhook")
+    log_info "Environment 1 Webhook URL: https://${cp1_ip}/api/webhook"
   else
     log_warn "Environment 1 public IP not available yet."
   fi
 
   if [[ -n "${cp2_ip}" ]]; then
-    webhook_urls+=("http://${cp2_ip}/api/webhook")
-    log_info "Environment 2 Webhook URL: http://${cp2_ip}/api/webhook"
+    webhook_urls+=("https://${cp2_ip}/api/webhook")
+    log_info "Environment 2 Webhook URL: https://${cp2_ip}/api/webhook"
   else
     log_warn "Environment 2 public IP not available yet."
   fi
