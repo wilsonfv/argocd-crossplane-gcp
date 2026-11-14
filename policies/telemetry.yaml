@@ -1,0 +1,13 @@
+apiVersion: telemetry.istio.io/v1alpha1
+kind: Telemetry
+metadata:
+  name: mesh-default-telemetry
+  namespace: istio-system
+spec:
+  # Enable access logging in JSON format for mesh and ambient traffic
+  accessLogging:
+    - providers:
+        - name: envoy
+  metrics:
+    - providers:
+        - name: prometheus

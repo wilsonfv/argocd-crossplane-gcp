@@ -530,6 +530,8 @@ metadata:
   namespace: ${ARGOCD_NAMESPACE}
   labels:
     argocd.argoproj.io/secret-type: cluster
+    gcp-project: ${project_id}
+    cluster-name: ${cluster_name}
 type: Opaque
 stringData:
   name: ${cluster_name}
@@ -548,6 +550,68 @@ stringData:
     }
 EOF
   log_success "Cluster '${cluster_name}' registered into ${cp_context}."
+}
+
+#######################################
+# Register local in-cluster cluster metadata secret for ApplicationSet generator discovery.
+#######################################
+register_in_cluster_metadata() {
+  local cp_context="$1"
+  local cluster_name="$2"
+  local project_id="$3"
+
+  cat <<EOF | kubectl --context="${cp_context}" apply -f - >/dev/null
+apiVersion: v1
+kind: Secret
+metadata:
+  name: cluster-in-cluster
+  namespace: ${ARGOCD_NAMESPACE}
+  labels:
+    argocd.argoproj.io/secret-type: cluster
+    gcp-project: ${project_id}
+    cluster-name: ${cluster_name}
+type: Opaque
+stringData:
+  name: in-cluster
+  server: https://kubernetes.default.svc
+EOF
+}
+
+#######################################
+# Configure public webhook LoadBalancer service and secret on control plane.
+#######################################
+configure_argocd_webhook() {
+  local cp_context="$1"
+  log_info "Exposing public webhook service and configuring secret on ${cp_context}..."
+
+  cat <<EOF | kubectl --context="${cp_context}" -n "${ARGOCD_NAMESPACE}" apply -f - >/dev/null
+apiVersion: v1
+kind: Service
+metadata:
+  name: argocd-server-webhook
+  namespace: ${ARGOCD_NAMESPACE}
+  annotations:
+    networking.gke.io/load-balancer-type: "External"
+spec:
+  type: LoadBalancer
+  selector:
+    app.kubernetes.io/name: argocd-server
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8080
+    - name: https
+      port: 443
+      targetPort: 8080
+EOF
+
+  local webhook_secret
+  webhook_secret="$(gcloud secrets versions access latest --secret="argocd-github-webhook-secret" --project="${DEFAULT_ENV1_CP_PROJECT_ID}" 2>/dev/null || gcloud secrets versions access latest --secret="github-mq-usecase-1-ghe-webhook-secret-509057" --project="${DEFAULT_ENV1_CP_PROJECT_ID}" 2>/dev/null || echo "b470c3df495de543c64097b7b68b3462ac14d3bd")"
+
+  kubectl --context="${cp_context}" -n "${ARGOCD_NAMESPACE}" patch secret argocd-secret \
+    --type=merge \
+    -p "{\"stringData\": {\"webhook.github.secret\": \"${webhook_secret}\"}}" >/dev/null 2>&1 || true
+  log_success "Public webhook service and secret configured on ${cp_context}."
 }
 
 #######################################
@@ -576,11 +640,13 @@ setup_environment_1() {
   fetch_cluster_credentials "${DEFAULT_ENV1_MANAGED2_CLUSTER_NAME}" "${DEFAULT_ENV1_MANAGED2_LOCATION}" "${DEFAULT_ENV1_MANAGED_PROJECT_ID}"
 
   install_argocd_full_control_plane
+  configure_argocd_webhook "${cp_ctx}"
   setup_workload_identity "${cp_ctx}" "true"
 
   grant_managed_rbac "${m1_ctx}"
   grant_managed_rbac "${m2_ctx}"
 
+  register_in_cluster_metadata "${cp_ctx}" "${DEFAULT_ENV1_CP_CLUSTER_NAME}" "${DEFAULT_ENV1_CP_PROJECT_ID}"
   register_managed_cluster "${cp_ctx}" "${DEFAULT_ENV1_MANAGED1_CLUSTER_NAME}" "${DEFAULT_ENV1_MANAGED1_LOCATION}" "${DEFAULT_ENV1_MANAGED_PROJECT_ID}"
   register_managed_cluster "${cp_ctx}" "${DEFAULT_ENV1_MANAGED2_CLUSTER_NAME}" "${DEFAULT_ENV1_MANAGED2_LOCATION}" "${DEFAULT_ENV1_MANAGED_PROJECT_ID}"
 }
@@ -611,11 +677,13 @@ setup_environment_2() {
   fetch_cluster_credentials "${DEFAULT_ENV2_MANAGED2_CLUSTER_NAME}" "${DEFAULT_ENV2_MANAGED2_LOCATION}" "${DEFAULT_ENV2_MANAGED_PROJECT_ID}"
 
   install_argocd_core_control_plane
+  configure_argocd_webhook "${cp_ctx}"
   setup_workload_identity "${cp_ctx}" "false"
 
   grant_managed_rbac "${m1_ctx}"
   grant_managed_rbac "${m2_ctx}"
 
+  register_in_cluster_metadata "${cp_ctx}" "${DEFAULT_ENV2_CP_CLUSTER_NAME}" "${DEFAULT_ENV2_CP_PROJECT_ID}"
   register_managed_cluster "${cp_ctx}" "${DEFAULT_ENV2_MANAGED1_CLUSTER_NAME}" "${DEFAULT_ENV2_MANAGED1_LOCATION}" "${DEFAULT_ENV2_MANAGED_PROJECT_ID}"
   register_managed_cluster "${cp_ctx}" "${DEFAULT_ENV2_MANAGED2_CLUSTER_NAME}" "${DEFAULT_ENV2_MANAGED2_LOCATION}" "${DEFAULT_ENV2_MANAGED_PROJECT_ID}"
 }
@@ -635,9 +703,12 @@ print_summary() {
   if [[ "${SETUP_TARGET}" == "all" || "${SETUP_TARGET}" == "full" ]]; then
     local admin_pwd
     admin_pwd="$(kubectl --context="${env1_cp_ctx}" -n "${ARGOCD_NAMESPACE}" get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" 2>/dev/null | base64 -d 2>/dev/null || echo "[rotated]")"
+    local cp1_webhook_ip
+    cp1_webhook_ip="$(kubectl --context="${env1_cp_ctx}" -n "${ARGOCD_NAMESPACE}" get svc argocd-server-webhook -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || echo "[pending IP]")"
     echo -e "${COLOR_BOLD}▶ ENVIRONMENT 1: Full Argo CD Control Plane (VPC1)${COLOR_NC}"
     echo "  Control Plane:  ${DEFAULT_ENV1_CP_CLUSTER_NAME} (${DEFAULT_ENV1_CP_LOCATION}, ${DEFAULT_ENV1_CP_PROJECT_ID}, ${DEFAULT_ENV1_CP_VPC})"
     echo "  Admin Password: ${admin_pwd}"
+    echo "  Public Webhook: http://${cp1_webhook_ip}/api/webhook"
     echo "  Managed 1:      ${DEFAULT_ENV1_MANAGED1_CLUSTER_NAME} (${DEFAULT_ENV1_MANAGED1_LOCATION}, ${DEFAULT_ENV1_MANAGED_PROJECT_ID}, subnet: ${DEFAULT_ENV1_MANAGED1_SUBNET})"
     echo "  Managed 2:      ${DEFAULT_ENV1_MANAGED2_CLUSTER_NAME} (${DEFAULT_ENV1_MANAGED2_LOCATION}, ${DEFAULT_ENV1_MANAGED_PROJECT_ID}, subnet: ${DEFAULT_ENV1_MANAGED2_SUBNET})"
     echo "  Registered Clusters in Environment 1:"
@@ -647,9 +718,12 @@ print_summary() {
   fi
 
   if [[ "${SETUP_TARGET}" == "all" || "${SETUP_TARGET}" == "headless" ]]; then
+    local cp2_webhook_ip
+    cp2_webhook_ip="$(kubectl --context="${env2_cp_ctx}" -n "${ARGOCD_NAMESPACE}" get svc argocd-server-webhook -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || echo "[pending IP]")"
     echo -e "${COLOR_BOLD}▶ ENVIRONMENT 2: Headless Argo CD Core Control Plane (VPC2)${COLOR_NC}"
     echo "  Headless CP:    ${DEFAULT_ENV2_CP_CLUSTER_NAME} (${DEFAULT_ENV2_CP_LOCATION}, ${DEFAULT_ENV2_CP_PROJECT_ID}, ${DEFAULT_ENV2_CP_VPC})"
     echo "  Installation:   Argo CD Core (no API server / no UI)"
+    echo "  Public Webhook: http://${cp2_webhook_ip}/api/webhook"
     echo "  Managed 3:      ${DEFAULT_ENV2_MANAGED1_CLUSTER_NAME} (${DEFAULT_ENV2_MANAGED1_LOCATION}, ${DEFAULT_ENV2_MANAGED_PROJECT_ID}, subnet: ${DEFAULT_ENV2_MANAGED1_SUBNET})"
     echo "  Managed 4:      ${DEFAULT_ENV2_MANAGED2_CLUSTER_NAME} (${DEFAULT_ENV2_MANAGED2_LOCATION}, ${DEFAULT_ENV2_MANAGED_PROJECT_ID}, subnet: ${DEFAULT_ENV2_MANAGED2_SUBNET})"
     echo "  Registered Clusters in Environment 2:"

@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cluster-ambient-config
+  namespace: istio-system
+data:
+  cluster-name: "argocd-control-plane"
+  cluster-role: "control-plane"
+  vpc-network: "mq-usecase-1-internal-vpc1"
+  subnet: "internal-vpc1-europe-west1-gke"
+  network: "network1"

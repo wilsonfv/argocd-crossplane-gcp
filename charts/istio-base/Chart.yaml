@@ -1,0 +1,10 @@
+apiVersion: v2
+name: istio-base
+description: Helm chart wrapping Istio Base CRDs for Istio Ambient Mode on GKE
+type: application
+version: 1.30.7
+appVersion: 1.30.7
+dependencies:
+  - name: base
+    version: 1.30.7
+    repository: https://istio-release.storage.googleapis.com/charts

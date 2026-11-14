@@ -1,0 +1,10 @@
+apiVersion: v2
+name: istio-cni
+description: Helm chart wrapping Istio CNI Plugin for Ambient Mode on GKE
+type: application
+version: 1.30.7
+appVersion: 1.30.7
+dependencies:
+  - name: cni
+    version: 1.30.7
+    repository: https://istio-release.storage.googleapis.com/charts

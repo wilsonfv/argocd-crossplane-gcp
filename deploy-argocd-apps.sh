@@ -26,7 +26,9 @@ readonly DEFAULT_REGION="europe-west1"
 readonly DEFAULT_ZONE=""
 readonly DEFAULT_ARGOCD_NAMESPACE="argocd"
 readonly DEFAULT_ISTIO_NAMESPACE="istio-system"
-readonly DEFAULT_ISTIO_REPO_URL="https://github.com/wilsonfv/istio-ambient-config.git"
+readonly DEFAULT_MAIN_REPO_URL="https://github.com/wilsonfv/argocd-crossplane-gcp.git"
+readonly DEFAULT_MQ1_REPO_URL="https://github.com/wilsonfv/argocd-mq-usecase-1.git"
+readonly DEFAULT_MQ2_REPO_URL="https://github.com/wilsonfv/argocd-mq-usecase-2.git"
 
 # Environment 1: Full Control Plane (VPC1)
 readonly DEFAULT_ENV1_CP_PROJECT_ID="mq-usecase-1"
@@ -306,14 +308,13 @@ ensure_gateway_api_crds() {
 }
 
 #######################################
-# Configure Argo CD repository Secret for private GitHub repo on a control plane cluster.
+# Configure Argo CD repository secrets for all required GitHub repositories.
 # Arguments:
 #   Control plane context
 #######################################
-ensure_argocd_repo_secret() {
+ensure_argocd_repo_secrets() {
   local cp_context="$1"
-  log_info "Configuring Argo CD credentials on ${cp_context} for ${ISTIO_REPO_URL}..."
-  local secret_name="repo-istio-ambient-config"
+  log_info "Configuring Argo CD credentials on ${cp_context}..."
   local token="${GITHUB_TOKEN:-}"
 
   if [[ -z "${token}" ]]; then
@@ -324,60 +325,40 @@ ensure_argocd_repo_secret() {
     fi
   fi
 
-  if [[ -n "${token}" ]]; then
-    kubectl --context="${cp_context}" create secret generic "${secret_name}" \
+  if [[ -z "${token}" ]]; then
+    log_warn "GITHUB_TOKEN not detected; skipping repository secrets creation on ${cp_context}."
+    return 0
+  fi
+
+  local repos=("${DEFAULT_MAIN_REPO_URL}" "${DEFAULT_MQ1_REPO_URL}" "${DEFAULT_MQ2_REPO_URL}")
+  local repo_url
+  for repo_url in "${repos[@]}"; do
+    local rname
+    rname="$(basename "${repo_url}" .git)"
+    kubectl --context="${cp_context}" create secret generic "repo-${rname}" \
       --namespace="${ARGOCD_NAMESPACE}" \
       --from-literal=type="git" \
-      --from-literal=url="${ISTIO_REPO_URL}" \
+      --from-literal=url="${repo_url}" \
       --from-literal=username="oauth2" \
       --from-literal=password="${token}" \
       --dry-run=client -o yaml | \
       kubectl --context="${cp_context}" label --local -f - "argocd.argoproj.io/secret-type=repository" -o yaml | \
       kubectl --context="${cp_context}" apply -f - >/dev/null
-    log_success "Repository secret '${secret_name}' configured on ${cp_context}."
-  else
-    log_warn "GITHUB_TOKEN not detected; skipping repository secret creation on ${cp_context}."
-  fi
+    log_success "Repository secret 'repo-${rname}' configured on ${cp_context}."
+  done
 }
 
 #######################################
-# Deploy root applications on a control plane.
+# Deploy generalized Root Application & ApplicationSets on a control plane.
 # Arguments:
 #   Control plane context
-#   Array of app-name:git-path entries
 #######################################
-deploy_cluster_root_app() {
+deploy_root_app() {
   local cp_context="$1"
-  local app_name="$2"
-  local git_path="$3"
 
-  log_info "[${cp_context}] Applying root application '${app_name}' (path: ${git_path})..."
-  cat <<EOF | kubectl --context="${cp_context}" apply -n "${ARGOCD_NAMESPACE}" -f - >/dev/null
-apiVersion: argoproj.io/v1alpha1
-kind: Application
-metadata:
-  name: ${app_name}
-  namespace: ${ARGOCD_NAMESPACE}
-  finalizers:
-    - resources-finalizer.argocd.argoproj.io
-spec:
-  project: default
-  source:
-    repoURL: ${ISTIO_REPO_URL}
-    targetRevision: HEAD
-    path: ${git_path}
-  destination:
-    server: https://kubernetes.default.svc
-    namespace: ${ARGOCD_NAMESPACE}
-  syncPolicy:
-    automated:
-      prune: true
-      selfHeal: true
-    syncOptions:
-      - CreateNamespace=true
-      - ServerSideApply=true
-EOF
-  log_success "[${cp_context}] Root application '${app_name}' applied."
+  log_info "[${cp_context}] Applying Root Application and ApplicationSets from argocd/root-app.yaml..."
+  kubectl --context="${cp_context}" apply -n "${ARGOCD_NAMESPACE}" -f argocd/root-app.yaml >/dev/null
+  log_success "[${cp_context}] Root Application applied. ApplicationSet generator active."
 }
 
 #######################################
@@ -468,11 +449,9 @@ deploy_environment_1() {
   ensure_gateway_api_crds "${m1_ctx}" "${ENV1_MANAGED1_CLUSTER_NAME}"
   ensure_gateway_api_crds "${m2_ctx}" "${ENV1_MANAGED2_CLUSTER_NAME}"
 
-  ensure_argocd_repo_secret "${cp_ctx}"
+  ensure_argocd_repo_secrets "${cp_ctx}"
 
-  deploy_cluster_root_app "${cp_ctx}" "istio-ambient-root-cp" "argocd/clusters/${ENV1_CP_CLUSTER_NAME}"
-  deploy_cluster_root_app "${cp_ctx}" "istio-ambient-root-managed-1" "argocd/clusters/${ENV1_MANAGED1_CLUSTER_NAME}"
-  deploy_cluster_root_app "${cp_ctx}" "istio-ambient-root-managed-2" "argocd/clusters/${ENV1_MANAGED2_CLUSTER_NAME}"
+  deploy_root_app "${cp_ctx}"
 
   wait_for_rollouts_cluster "${cp_ctx}" "${ENV1_CP_CLUSTER_NAME}"
   wait_for_rollouts_cluster "${m1_ctx}" "${ENV1_MANAGED1_CLUSTER_NAME}"
@@ -508,11 +487,9 @@ deploy_environment_2() {
   ensure_gateway_api_crds "${m1_ctx}" "${ENV2_MANAGED1_CLUSTER_NAME}"
   ensure_gateway_api_crds "${m2_ctx}" "${ENV2_MANAGED2_CLUSTER_NAME}"
 
-  ensure_argocd_repo_secret "${cp_ctx}"
+  ensure_argocd_repo_secrets "${cp_ctx}"
 
-  deploy_cluster_root_app "${cp_ctx}" "istio-ambient-root-cp-headless" "argocd/clusters/${ENV2_CP_CLUSTER_NAME}"
-  deploy_cluster_root_app "${cp_ctx}" "istio-ambient-root-managed-3" "argocd/clusters/${ENV2_MANAGED1_CLUSTER_NAME}"
-  deploy_cluster_root_app "${cp_ctx}" "istio-ambient-root-managed-4" "argocd/clusters/${ENV2_MANAGED2_CLUSTER_NAME}"
+  deploy_root_app "${cp_ctx}"
 
   wait_for_rollouts_cluster "${cp_ctx}" "${ENV2_CP_CLUSTER_NAME}"
   wait_for_rollouts_cluster "${m1_ctx}" "${ENV2_MANAGED1_CLUSTER_NAME}"

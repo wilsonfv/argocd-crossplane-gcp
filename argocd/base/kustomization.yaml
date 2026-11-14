@@ -1,0 +1,10 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - 00-istio-base.yaml
+  - 01-istio-cni.yaml
+  - 01-istiod.yaml
+  - 02-istio-ztunnel.yaml
+  - 03-istio-policies.yaml
+  - 04-ambient-samples.yaml

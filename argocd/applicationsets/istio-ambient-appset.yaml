@@ -1,0 +1,65 @@
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: istio-ambient-stack
+  namespace: argocd
+spec:
+  generators:
+    - matrix:
+        generators:
+          - clusters: {}
+          - list:
+              elements:
+                - app: istio-base
+                  path: charts/istio-base
+                  wave: "0"
+                - app: istio-cni
+                  path: charts/istio-cni
+                  wave: "1"
+                - app: istiod
+                  path: charts/istiod
+                  wave: "1"
+                - app: istio-ztunnel
+                  path: charts/istio-ztunnel
+                  wave: "2"
+                - app: istio-policies
+                  path: policies
+                  wave: "3"
+                - app: ambient-samples
+                  path: samples
+                  wave: "4"
+  template:
+    metadata:
+      name: "{{app}}-{{name}}"
+      namespace: argocd
+      annotations:
+        argocd.argoproj.io/sync-wave: "{{wave}}"
+      finalizers:
+        - resources-finalizer.argocd.argoproj.io
+    spec:
+      project: default
+      source:
+        repoURL: https://github.com/wilsonfv/argocd-crossplane-gcp.git
+        targetRevision: HEAD
+        path: "{{path}}"
+      destination:
+        name: "{{name}}"
+        namespace: istio-system
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+          - CreateNamespace=true
+          - ServerSideApply=true
+          - RespectIgnoreDifferences=true
+      ignoreDifferences:
+        - group: admissionregistration.k8s.io
+          kind: ValidatingWebhookConfiguration
+          name: istiod-default-validator
+          jsonPointers:
+            - /webhooks
+        - group: apiextensions.k8s.io
+          kind: CustomResourceDefinition
+          jsonPointers:
+            - /spec/conversion/webhook/clientConfig/caBundle

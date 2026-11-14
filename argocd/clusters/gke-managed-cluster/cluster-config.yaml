@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cluster-ambient-config
+  namespace: istio-system
+data:
+  cluster-name: "gke-managed-cluster"
+  cluster-role: "managed"
+  gcp-project: "mq-usecase-2"
+  vpc-network: "mq-usecase-2-internal-vpc1"
+  subnet: "internal-vpc1-europe-west1-gke"
+  network: "network1"

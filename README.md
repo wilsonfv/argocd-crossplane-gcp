@@ -10,15 +10,23 @@ Automated scripts and declarative GitOps source-of-truth configurations followin
 .
 ├── setup-multicluster.sh      # Provisions 6-cluster GKE & configures Argo CD via Workload Identity
 ├── install-crossplane.sh      # Installs latest Crossplane on GKE via Helm
-├── deploy-argocd-apps.sh      # Deploys Istio Ambient Mode across all 6 clusters via Argo CD
+├── deploy-argocd-apps.sh      # Deploys Istio Ambient Mode across all 6 clusters via Root App & ApplicationSets
+├── setup-github-webhook.sh    # Configures GitHub App / Webhook subscription for automated GitOps push sync
 ├── access-argocd-ui.sh        # Port-forwards Argo CD Web UI & displays admin credentials
+├── argocd/                    # Generalized Root Application (App-of-Apps) and ApplicationSets
+│   ├── root-app.yaml          # Root Application
+│   └── applicationsets/       # ApplicationSets (Matrix & Cluster generators)
+├── charts/                    # Helm charts (istio-base, istio-cni, istiod, istio-ztunnel, istio-waypoint)
+├── policies/                  # Istio Ambient authorization, telemetry & network policies
+├── samples/                   # Sample workloads (echo-server, sleep-client, waypoint-gateway)
 └── README.md
 ```
 
-> **Note**: All Istio Ambient Mode configurations reside exclusively in the private GitOps repository:
-> 👉 [**github.com/wilsonfv/istio-ambient-config**](https://github.com/wilsonfv/istio-ambient-config)
->
-> This repository contains **no Istio configurations**; deployment syncs directly from the private repository.
+> **Architecture**:
+> - **Main GitOps Repo** ([`github.com/wilsonfv/argocd-crossplane-gcp`](https://github.com/wilsonfv/argocd-crossplane-gcp)): Contains all generalized Argo CD application definitions, Helm charts, and ApplicationSets.
+> - **Project `mq-usecase-1` Repo** ([`github.com/wilsonfv/argocd-mq-usecase-1`](https://github.com/wilsonfv/argocd-mq-usecase-1)): Minimal dedicated cluster configs for `argocd-control-plane` and `argocd-control-plane-headless`.
+> - **Project `mq-usecase-2` Repo** ([`github.com/wilsonfv/argocd-mq-usecase-2`](https://github.com/wilsonfv/argocd-mq-usecase-2)): Minimal dedicated cluster configs for `gke-managed-cluster`, `gke-managed-cluster-2`, `gke-managed-cluster-3`, and `gke-managed-cluster-4`.
+> - **Automated GitOps Sync**: GitHub push events on `main` trigger Argo CD's public webhook endpoints to sync configs instantly. Secrets stored in GCP Secret Manager (`mq-usecase-1`).
 
 ---
 
@@ -102,24 +110,34 @@ Manual access commands:
 
 ---
 
-## 3. Deploy Istio Service Mesh (Ambient Mode) to All 3 GKE Clusters via Argo CD
+## 3. Deploy Applications via Root App & ApplicationSet
 
-Istio Ambient Mode configurations are synchronized from the dedicated private GitOps repository:
-👉 [**github.com/wilsonfv/istio-ambient-config**](https://github.com/wilsonfv/istio-ambient-config) (Private)
+Argo CD application manifests have been generalized in this repository using **Root App** (App-of-Apps) and **ApplicationSets**:
+- **`argocd/root-app.yaml`**: Root Application deployed to the control plane, managing the ApplicationSets.
+- **`argocd/applicationsets/istio-ambient-appset.yaml`**: Uses a Matrix generator (Clusters × Apps) to dynamically deploy all 6 Ambient mesh components (`istio-base`, `istio-cni`, `istiod`, `istio-ztunnel`, `istio-policies`, `ambient-samples`) to each registered cluster without duplicated manifests.
+- **`argocd/applicationsets/cluster-configs-appset.yaml`**: Uses Cluster generator matching `gcp-project` labels to sync minimal cluster-specific values from `argocd-mq-usecase-1` and `argocd-mq-usecase-2`.
 
-### Shared Argo CD Apps & Dedicated Cluster Configurations
-The GitOps repository refactors Argo CD application manifests using Kustomize inheritance:
-- **`argocd/base/`**: Shared base application definitions (`00-istio-base`, `01-istio-cni`, `01-istiod`, `02-istio-ztunnel`, `03-istio-policies`, `04-ambient-samples`) containing all common sync policies, sync waves, retry logic, and ignore differences.
-- **`argocd/clusters/<cluster-name>/`**: Dedicated folder per cluster containing:
-  - `kustomization.yaml`: Inherits from `../../base`, applies cluster name suffix (`-cp`, `-managed-1`, `-managed-2`), and patches the target cluster destination.
-  - `cluster-config.yaml`: Cluster-specific configurations, networking metadata, and ConfigMaps.
-  - `05-argocd.yaml` (control plane only): Self-managing Argo CD Application on the control plane cluster.
+### Dedicated Repositories per GCP Project
+1. **[`argocd-mq-usecase-1`](https://github.com/wilsonfv/argocd-mq-usecase-1)**:
+   - `argocd-control-plane/`: `cluster-config.yaml`, `values.yaml`
+   - `argocd-control-plane-headless/`: `cluster-config.yaml`, `values.yaml`
+2. **[`argocd-mq-usecase-2`](https://github.com/wilsonfv/argocd-mq-usecase-2)**:
+   - `gke-managed-cluster/`: `cluster-config.yaml`, `values.yaml`
+   - `gke-managed-cluster-2/`: `cluster-config.yaml`, `values.yaml`
+   - `gke-managed-cluster-3/`: `cluster-config.yaml`, `values.yaml`
+   - `gke-managed-cluster-4/`: `cluster-config.yaml`, `values.yaml`
 
-### Self-Managing Argo CD on Control Plane
-Argo CD on the control plane cluster is managed declaratively by Argo CD itself (`argocd-cp`):
-- Declarative manifests reside in `manifests/argocd/` with Kustomize patches that enforce GCP Workload Identity annotations on `argocd-application-controller` and `argocd-server`.
-- Reconciles and self-heals all Argo CD controllers, server deployments, CRDs, and RBAC policies.
-- Protects runtime cluster secrets and initial credentials via `ignoreDifferences` and non-destructive sync policies.
+### Public Webhooks & GitHub App Automated Sync
+Both Argo CD control planes expose public external LoadBalancers (`argocd-server-webhook`) for webhook event delivery.
+
+Run the webhook setup script to link the repositories and Argo CD:
+```bash
+./setup-github-webhook.sh
+```
+- Fetches `argocd-github-webhook-secret` from GCP Secret Manager (`mq-usecase-1`).
+- Configures `webhook.github.secret` in `argocd-secret` on both control plane clusters.
+- Registers GitHub Webhooks across all three repositories (`argocd-crossplane-gcp`, `argocd-mq-usecase-1`, `argocd-mq-usecase-2`) for `push` events to `main`.
+- Any commit pushed to `main` immediately notifies Argo CD to reconcile without waiting for polling intervals.
 
 To deploy Istio Ambient mesh across all 6 clusters (2 control planes + 4 managed clusters):
 ```bash

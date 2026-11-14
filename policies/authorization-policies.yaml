@@ -1,0 +1,32 @@
+# L4 Authorization Policy: Enforced by ztunnel at Layer 4 (mTLS identities)
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+  name: allow-mesh-internal
+  namespace: apps-ambient
+spec:
+  # Allow traffic originating from authenticated mesh identities
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            principals:
+              - "cluster.local/ns/apps-ambient/sa/sleep-client"
+              - "cluster.local/ns/apps-ambient/sa/namespace-waypoint"
+              - "cluster.local/ns/istio-system/sa/*"
+---
+# L7 Authorization Policy: Enforced by Waypoint Proxy at Layer 7 (HTTP methods/paths)
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+  name: echo-server-l7-policy
+  namespace: apps-ambient
+spec:
+  selector:
+    matchLabels:
+      app: echo-server
+  action: ALLOW
+  rules:
+    - to:
+        - operation:
+            methods: ["GET", "HEAD"]
