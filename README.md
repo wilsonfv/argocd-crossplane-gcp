@@ -8,9 +8,9 @@ Automated scripts and declarative GitOps source-of-truth configurations followin
 
 ```text
 .
-├── setup-multicluster.sh      # Provisions 3-cluster GKE & configures Argo CD via Workload Identity
+├── setup-multicluster.sh      # Provisions 6-cluster GKE & configures Argo CD via Workload Identity
 ├── install-crossplane.sh      # Installs latest Crossplane on GKE via Helm
-├── deploy-istio-ambient.sh    # Deploys Istio Ambient Mode across all 3 clusters via Argo CD
+├── deploy-argocd-apps.sh      # Deploys Istio Ambient Mode across all 6 clusters via Argo CD
 ├── access-argocd-ui.sh        # Port-forwards Argo CD Web UI & displays admin credentials
 └── README.md
 ```
@@ -124,18 +124,18 @@ Argo CD on the control plane cluster is managed declaratively by Argo CD itself 
 To deploy Istio Ambient mesh across all 6 clusters (2 control planes + 4 managed clusters):
 ```bash
 # Deploy to all 6 clusters across both environments (default)
-./deploy-istio-ambient.sh --all
+./deploy-argocd-apps.sh --all
 
 # Or deploy to Environment 1 only (Full Control Plane + 2 Managed Clusters)
-./deploy-istio-ambient.sh --full
+./deploy-argocd-apps.sh --full
 
 # Or deploy to Environment 2 only (Headless Control Plane + 2 Managed Clusters)
-./deploy-istio-ambient.sh --headless
+./deploy-argocd-apps.sh --headless
 ```
 
 Or pass your GitHub PAT explicitly if not detected:
 ```bash
-./deploy-istio-ambient.sh --token <GITHUB_PAT>
+./deploy-argocd-apps.sh --token <GITHUB_PAT>
 ```
 
 ### Validate Ambient Mode Traffic Across All 6 Clusters
