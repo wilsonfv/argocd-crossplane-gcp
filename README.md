@@ -13,9 +13,10 @@ Automated scripts and declarative GitOps source-of-truth configurations followin
 ├── deploy-argocd-apps.sh      # Deploys Istio Ambient Mode across all 6 clusters via Root App & ApplicationSets
 ├── setup-github-webhook.sh    # Configures GitHub App / Webhook subscription for automated GitOps push sync
 ├── access-argocd-ui.sh        # Port-forwards Argo CD Web UI & displays admin credentials
-├── argocd/                    # Generalized Root Application (App-of-Apps) and ApplicationSets
+├── argocd/                    # Argo CD configurations, ApplicationSets and manifests
 │   ├── root-app.yaml          # Root Application
-│   └── applicationsets/       # ApplicationSets (Matrix & Cluster generators)
+│   ├── applicationsets/       # ApplicationSets (Matrix & Cluster generators)
+│   └── manifests/             # Declarative Argo CD installation & RBAC patches
 ├── feature/                   # Root folder for platform features
 │   └── istio/                 # Istio Service Mesh configuration
 │       ├── charts/            # Helm charts (istio-base, istio-cni, istiod, istio-ztunnel, istio-waypoint)
