@@ -11,22 +11,22 @@ spec:
           - list:
               elements:
                 - app: istio-base
-                  path: charts/istio-base
+                  path: feature/istio/charts/istio-base
                   wave: "0"
                 - app: istio-cni
-                  path: charts/istio-cni
+                  path: feature/istio/charts/istio-cni
                   wave: "1"
                 - app: istiod
-                  path: charts/istiod
+                  path: feature/istio/charts/istiod
                   wave: "1"
                 - app: istio-ztunnel
-                  path: charts/istio-ztunnel
+                  path: feature/istio/charts/istio-ztunnel
                   wave: "2"
                 - app: istio-policies
-                  path: policies
+                  path: feature/istio/policies
                   wave: "3"
                 - app: ambient-samples
-                  path: samples
+                  path: feature/istio/samples
                   wave: "4"
   template:
     metadata:

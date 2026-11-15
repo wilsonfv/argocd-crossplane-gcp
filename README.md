@@ -16,9 +16,11 @@ Automated scripts and declarative GitOps source-of-truth configurations followin
 ├── argocd/                    # Generalized Root Application (App-of-Apps) and ApplicationSets
 │   ├── root-app.yaml          # Root Application
 │   └── applicationsets/       # ApplicationSets (Matrix & Cluster generators)
-├── charts/                    # Helm charts (istio-base, istio-cni, istiod, istio-ztunnel, istio-waypoint)
-├── policies/                  # Istio Ambient authorization, telemetry & network policies
-├── samples/                   # Sample workloads (echo-server, sleep-client, waypoint-gateway)
+├── feature/                   # Root folder for platform features
+│   └── istio/                 # Istio Service Mesh configuration
+│       ├── charts/            # Helm charts (istio-base, istio-cni, istiod, istio-ztunnel, istio-waypoint)
+│       ├── policies/          # Ambient authorization, telemetry & network policies
+│       └── samples/           # Sample workloads (echo-server, sleep-client, waypoint-gateway)
 └── README.md
 ```
 
