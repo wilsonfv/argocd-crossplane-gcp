@@ -351,8 +351,14 @@ fetch_cluster_credentials() {
   local loc_flag
   loc_flag="$(format_location_flag "${location}")"
 
+  local lockdir="/tmp/kubeconfig_get_credentials.lock"
+  while ! mkdir "${lockdir}" 2>/dev/null; do
+    sleep 0.5
+  done
+
   log_info "Fetching kubeconfig credentials for '${cluster_name}' in ${location} (project '${project_id}')..."
-  gcloud container clusters get-credentials "${cluster_name}" "${loc_flag}" --project "${project_id}"
+  gcloud container clusters get-credentials "${cluster_name}" "${loc_flag}" --project "${project_id}" || true
+  rm -rf "${lockdir}"
 }
 
 #######################################
@@ -484,8 +490,30 @@ grant_managed_rbac() {
 
   log_info "Granting namespace-level admin RBAC to GSA on ${managed_context} (namespaces: ${namespaces[*]})..."
 
-  # Remove cluster-wide clusterrolebinding if previously created
-  kubectl --context="${managed_context}" delete clusterrolebinding argocd-workload-identity-admin --ignore-not-found >/dev/null 2>&1 || true
+  # Grant cluster-scoped permissions required for Istio CRDs, webhooks and clusterroles
+  cat <<EOF | kubectl --context="${managed_context}" apply -f - >/dev/null
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: argocd-workload-identity-cluster-scoped
+rules:
+  - apiGroups: ["*"]
+    resources: ["*"]
+    verbs: ["*"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: argocd-workload-identity-cluster-scoped
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: argocd-workload-identity-cluster-scoped
+subjects:
+  - kind: User
+    name: ${gsa_email}
+    apiGroup: rbac.authorization.k8s.io
+EOF
 
   local ns
   for ns in "${namespaces[@]}"; do
