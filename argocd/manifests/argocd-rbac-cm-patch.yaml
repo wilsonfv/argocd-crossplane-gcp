@@ -57,3 +57,6 @@ data:
     p, admin, projects, create, *, deny
     p, admin, projects, update, *, deny
     p, admin, projects, delete, *, deny
+
+    # Map admin user to role:readonly
+    g, admin, role:readonly

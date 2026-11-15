@@ -378,6 +378,63 @@ install_argocd_full_control_plane() {
     kubectl --context="${cp_context}" apply --server-side --force-conflicts -n "${ARGOCD_NAMESPACE}" -f "${manifest_url}"
   fi
 
+  log_info "Configuring Read-Only Web UI RBAC policy in argocd-rbac-cm on '${cp_context}'..."
+  cat <<EOF | kubectl --context="${cp_context}" -n "${ARGOCD_NAMESPACE}" apply -f - >/dev/null
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: argocd-rbac-cm
+  namespace: ${ARGOCD_NAMESPACE}
+data:
+  policy.default: role:readonly
+  policy.csv: |
+    # Allow read-only visibility across all resources
+    p, role:readonly, applications, get, */*, allow
+    p, role:readonly, certificates, get, *, allow
+    p, role:readonly, clusters, get, *, allow
+    p, role:readonly, repositories, get, *, allow
+    p, role:readonly, projects, get, *, allow
+    p, role:readonly, accounts, get, *, allow
+    p, role:readonly, gpgkeys, get, *, allow
+    p, role:readonly, logs, get, */*, allow
+
+    # Deny all mutations on application level
+    p, role:readonly, applications, create, */*, deny
+    p, role:readonly, applications, update, */*, deny
+    p, role:readonly, applications, update/*, */*, deny
+    p, role:readonly, applications, delete, */*, deny
+    p, role:readonly, applications, delete/*, */*, deny
+    p, role:readonly, applications, sync, */*, deny
+    p, role:readonly, applications, sync/*, */*, deny
+    p, role:readonly, applications, override, */*, deny
+    p, role:readonly, applications, action/*, */*, deny
+    p, role:readonly, exec, create, */*, deny
+
+    # Deny all mutations for admin user
+    p, admin, applications, create, */*, deny
+    p, admin, applications, update, */*, deny
+    p, admin, applications, update/*, */*, deny
+    p, admin, applications, delete, */*, deny
+    p, admin, applications, delete/*, */*, deny
+    p, admin, applications, sync, */*, deny
+    p, admin, applications, sync/*, */*, deny
+    p, admin, applications, override, */*, deny
+    p, admin, applications, action/*, */*, deny
+    p, admin, exec, create, */*, deny
+    p, admin, clusters, create, *, deny
+    p, admin, clusters, update, *, deny
+    p, admin, clusters, delete, *, deny
+    p, admin, repositories, create, *, deny
+    p, admin, repositories, update, *, deny
+    p, admin, repositories, delete, *, deny
+    p, admin, projects, create, *, deny
+    p, admin, projects, update, *, deny
+    p, admin, projects, delete, *, deny
+
+    # Map admin user to role:readonly
+    g, admin, role:readonly
+EOF
+
   log_info "Waiting for Full Argo CD components rollout on '${cp_context}'..."
   kubectl --context="${cp_context}" rollout status deployment/argocd-server -n "${ARGOCD_NAMESPACE}" --timeout=300s
   kubectl --context="${cp_context}" rollout status deployment/argocd-repo-server -n "${ARGOCD_NAMESPACE}" --timeout=300s
