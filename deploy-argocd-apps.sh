@@ -366,6 +366,11 @@ ensure_argocd_repo_secrets() {
       kubectl --context="${cp_context}" apply -f - >/dev/null
     log_success "Repository secret 'repo-${rname}' configured on ${cp_context}."
   done
+
+  kubectl --context="${cp_context}" -n "${ARGOCD_NAMESPACE}" create secret generic scm-github-token \
+    --from-literal=token="${token}" \
+    --dry-run=client -o yaml | kubectl --context="${cp_context}" apply -f - >/dev/null
+  log_success "SCM Provider token secret 'scm-github-token' configured on ${cp_context}."
 }
 
 #######################################

@@ -1,0 +1,46 @@
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: cluster-configs-scm
+  namespace: argocd
+spec:
+  generators:
+    - matrix:
+        generators:
+          - scmProvider:
+              cloneProtocol: https
+              github:
+                api: http://github-scm-proxy.argocd.svc.cluster.local
+                organization: wilsonfv
+                tokenRef:
+                  secretName: scm-github-token
+                  key: token
+              filters:
+                - repositoryMatch: "^argocd-mq-usecase-.*"
+          - git:
+              repoURL: "{{url}}"
+              revision: "{{branch}}"
+              directories:
+                - path: "*"
+  template:
+    metadata:
+      name: "cluster-config-{{path.basename}}"
+      namespace: argocd
+      finalizers:
+        - resources-finalizer.argocd.argoproj.io
+    spec:
+      project: default
+      source:
+        repoURL: "{{url}}"
+        targetRevision: "{{branch}}"
+        path: "{{path}}"
+      destination:
+        name: "{{path.basename}}"
+        namespace: istio-system
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+          - CreateNamespace=true
+          - ServerSideApply=true

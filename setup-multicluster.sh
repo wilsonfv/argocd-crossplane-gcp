@@ -676,7 +676,35 @@ type: Opaque
 stringData:
   name: in-cluster
   server: https://kubernetes.default.svc
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: cluster-local-cp
+  namespace: ${ARGOCD_NAMESPACE}
+  labels:
+    argocd.argoproj.io/secret-type: cluster
+    gcp-project: ${project_id}
+    cluster-name: ${cluster_name}
+type: Opaque
+stringData:
+  name: ${cluster_name}
+  server: https://kubernetes.default.svc
 EOF
+
+  local token="${GITHUB_TOKEN:-}"
+  if [[ -z "${token}" ]]; then
+    local remote_url
+    remote_url="$(git remote get-url origin 2>/dev/null || true)"
+    if [[ "${remote_url}" =~ oauth2:([^@]+)@ ]]; then
+      token="${BASH_REMATCH[1]}"
+    fi
+  fi
+  if [[ -n "${token}" ]]; then
+    kubectl --context="${cp_context}" -n "${ARGOCD_NAMESPACE}" create secret generic scm-github-token \
+      --from-literal=token="${token}" \
+      --dry-run=client -o yaml | kubectl --context="${cp_context}" apply -f - >/dev/null
+  fi
 }
 
 #######################################
