@@ -31,6 +31,7 @@ readonly DEFAULT_ENV2_CP_CONTEXT="gke_mq-usecase-1_europe-west1_argocd-control-p
 readonly REPOSITORIES=(
   "argocd-mq-usecase-1"
   "argocd-mq-usecase-2"
+  "argocd-mq-usecase-3"
   "argocd-crossplane-gcp"
 )
 

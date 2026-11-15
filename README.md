@@ -57,7 +57,9 @@ Automated scripts and declarative GitOps source-of-truth configurations followin
    - Mode: **Full Argo CD installation** (Web UI, API server, controller, repo-server, dex, redis).
 2. **Managed Cluster 1**: `gke-managed-cluster` in GCP `mq-usecase-2`, VPC `mq-usecase-2-internal-vpc1`, subnet `internal-vpc1-europe-west1-gke` (`europe-west1-b`).
 3. **Managed Cluster 2**: `gke-managed-cluster-2` in GCP `mq-usecase-2`, VPC `mq-usecase-2-internal-vpc1`, subnet `internal-vpc1-europe-west1-gke2` (`europe-west1-b`).
-   - Both managed clusters registered into `argocd-control-plane` using GCP Workload Identity with `execProviderConfig` (`argocd-k8s-auth gcp`).
+4. **Managed Cluster 5**: `gke-managed-cluster-5` in GCP `mq-usecase-3`, VPC `mq-usecase-3-internal-vpc1`, subnet `internal-vpc1-europe-west1-gke` (`europe-west1-b`).
+5. **Managed Cluster 6**: `gke-managed-cluster-6` in GCP `mq-usecase-3`, VPC `mq-usecase-3-internal-vpc1`, subnet `internal-vpc1-europe-west1-gke2` (`europe-west1-b`).
+   - All managed clusters registered into `argocd-control-plane` using GCP Workload Identity with `execProviderConfig` (`argocd-k8s-auth gcp`).
 
 #### Environment 2: Headless Argo CD Core Control Plane (VPC2)
 1. **Headless Control Plane**: `argocd-control-plane-headless` in GCP `mq-usecase-1`, VPC `mq-usecase-1-internal-vpc2`, subnet `internal-vpc2-europe-west1-gke` (`europe-west1`).
@@ -129,6 +131,9 @@ Argo CD application manifests have been generalized in this repository using **R
    - `gke-managed-cluster-2/`: `cluster-config.yaml`, `values.yaml`
    - `gke-managed-cluster-3/`: `cluster-config.yaml`, `values.yaml`
    - `gke-managed-cluster-4/`: `cluster-config.yaml`, `values.yaml`
+3. **[`argocd-mq-usecase-3`](https://github.com/wilsonfv/argocd-mq-usecase-3)**:
+   - `gke-managed-cluster-5/`: `cluster-config.yaml`, `values.yaml`
+   - `gke-managed-cluster-6/`: `cluster-config.yaml`, `values.yaml`
 
 ### Public Webhooks & GitHub App Automated Sync
 Both Argo CD control planes expose public external LoadBalancers (`argocd-server-webhook`) for webhook event delivery.

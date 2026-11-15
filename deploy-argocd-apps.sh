@@ -29,6 +29,7 @@ readonly DEFAULT_ISTIO_NAMESPACE="istio-system"
 readonly DEFAULT_MAIN_REPO_URL="https://github.com/wilsonfv/argocd-crossplane-gcp.git"
 readonly DEFAULT_MQ1_REPO_URL="https://github.com/wilsonfv/argocd-mq-usecase-1.git"
 readonly DEFAULT_MQ2_REPO_URL="https://github.com/wilsonfv/argocd-mq-usecase-2.git"
+readonly DEFAULT_MQ3_REPO_URL="https://github.com/wilsonfv/argocd-mq-usecase-3.git"
 
 # Environment 1: Full Control Plane (VPC1)
 readonly DEFAULT_ENV1_CP_PROJECT_ID="mq-usecase-1"
@@ -40,6 +41,12 @@ readonly DEFAULT_ENV1_MANAGED1_CLUSTER_NAME="gke-managed-cluster"
 readonly DEFAULT_ENV1_MANAGED1_LOCATION="europe-west1-b"
 readonly DEFAULT_ENV1_MANAGED2_CLUSTER_NAME="gke-managed-cluster-2"
 readonly DEFAULT_ENV1_MANAGED2_LOCATION="europe-west1-b"
+
+readonly DEFAULT_ENV1_MANAGED3_PROJECT_ID="mq-usecase-3"
+readonly DEFAULT_ENV1_MANAGED5_CLUSTER_NAME="gke-managed-cluster-5"
+readonly DEFAULT_ENV1_MANAGED5_LOCATION="europe-west1-b"
+readonly DEFAULT_ENV1_MANAGED6_CLUSTER_NAME="gke-managed-cluster-6"
+readonly DEFAULT_ENV1_MANAGED6_LOCATION="europe-west1-b"
 
 # Environment 2: Headless Control Plane (VPC2)
 readonly DEFAULT_ENV2_CP_PROJECT_ID="mq-usecase-1"
@@ -75,6 +82,12 @@ ENV1_MANAGED1_CLUSTER_NAME="${ENV1_MANAGED1_CLUSTER_NAME:-${DEFAULT_ENV1_MANAGED
 ENV1_MANAGED1_LOCATION="${ENV1_MANAGED1_LOCATION:-${DEFAULT_ENV1_MANAGED1_LOCATION}}"
 ENV1_MANAGED2_CLUSTER_NAME="${ENV1_MANAGED2_CLUSTER_NAME:-${DEFAULT_ENV1_MANAGED2_CLUSTER_NAME}}"
 ENV1_MANAGED2_LOCATION="${ENV1_MANAGED2_LOCATION:-${DEFAULT_ENV1_MANAGED2_LOCATION}}"
+
+ENV1_MANAGED3_PROJECT_ID="${ENV1_MANAGED3_PROJECT_ID:-${DEFAULT_ENV1_MANAGED3_PROJECT_ID}}"
+ENV1_MANAGED5_CLUSTER_NAME="${ENV1_MANAGED5_CLUSTER_NAME:-${DEFAULT_ENV1_MANAGED5_CLUSTER_NAME}}"
+ENV1_MANAGED5_LOCATION="${ENV1_MANAGED5_LOCATION:-${DEFAULT_ENV1_MANAGED5_LOCATION}}"
+ENV1_MANAGED6_CLUSTER_NAME="${ENV1_MANAGED6_CLUSTER_NAME:-${DEFAULT_ENV1_MANAGED6_CLUSTER_NAME}}"
+ENV1_MANAGED6_LOCATION="${ENV1_MANAGED6_LOCATION:-${DEFAULT_ENV1_MANAGED6_LOCATION}}"
 
 # Environment 2
 ENV2_CP_PROJECT_ID="${ENV2_CP_PROJECT_ID:-${DEFAULT_ENV2_CP_PROJECT_ID}}"
@@ -240,12 +253,19 @@ connect_cluster() {
   local loc_flag
   loc_flag="$(format_location_flag "${location}")"
 
+  local lockdir="/tmp/kubeconfig_get_credentials.lock"
+  while ! mkdir "${lockdir}" 2>/dev/null; do
+    sleep 0.5
+  done
+
   log_info "Connecting to cluster '${cluster_name}' in ${location} (${project_id})..."
   if ! gcloud container clusters describe "${cluster_name}" "${loc_flag}" --project "${project_id}" &>/dev/null; then
+    rm -rf "${lockdir}"
     log_error "Cluster '${cluster_name}' not found in project ${project_id} (${location})."
     return 1
   fi
-  gcloud container clusters get-credentials "${cluster_name}" "${loc_flag}" --project "${project_id}"
+  gcloud container clusters get-credentials "${cluster_name}" "${loc_flag}" --project "${project_id}" || true
+  rm -rf "${lockdir}"
   log_success "Connected to '${cluster_name}'."
 }
 
@@ -330,7 +350,7 @@ ensure_argocd_repo_secrets() {
     return 0
   fi
 
-  local repos=("${DEFAULT_MAIN_REPO_URL}" "${DEFAULT_MQ1_REPO_URL}" "${DEFAULT_MQ2_REPO_URL}")
+  local repos=("${DEFAULT_MAIN_REPO_URL}" "${DEFAULT_MQ1_REPO_URL}" "${DEFAULT_MQ2_REPO_URL}" "${DEFAULT_MQ3_REPO_URL}")
   local repo_url
   for repo_url in "${repos[@]}"; do
     local rname
@@ -436,6 +456,8 @@ deploy_environment_1() {
   local cp_ctx="gke_${ENV1_CP_PROJECT_ID}_${ENV1_CP_LOCATION}_${ENV1_CP_CLUSTER_NAME}"
   local m1_ctx="gke_${ENV1_MANAGED_PROJECT_ID}_${ENV1_MANAGED1_LOCATION}_${ENV1_MANAGED1_CLUSTER_NAME}"
   local m2_ctx="gke_${ENV1_MANAGED_PROJECT_ID}_${ENV1_MANAGED2_LOCATION}_${ENV1_MANAGED2_CLUSTER_NAME}"
+  local m5_ctx="gke_${ENV1_MANAGED3_PROJECT_ID}_${ENV1_MANAGED5_LOCATION}_${ENV1_MANAGED5_CLUSTER_NAME}"
+  local m6_ctx="gke_${ENV1_MANAGED3_PROJECT_ID}_${ENV1_MANAGED6_LOCATION}_${ENV1_MANAGED6_CLUSTER_NAME}"
 
   echo ""
   echo -e "${COLOR_GREEN}=====================================================================${COLOR_NC}"
@@ -445,10 +467,14 @@ deploy_environment_1() {
   connect_cluster "${ENV1_CP_CLUSTER_NAME}" "${ENV1_CP_LOCATION}" "${ENV1_CP_PROJECT_ID}"
   connect_cluster "${ENV1_MANAGED1_CLUSTER_NAME}" "${ENV1_MANAGED1_LOCATION}" "${ENV1_MANAGED_PROJECT_ID}"
   connect_cluster "${ENV1_MANAGED2_CLUSTER_NAME}" "${ENV1_MANAGED2_LOCATION}" "${ENV1_MANAGED_PROJECT_ID}"
+  connect_cluster "${ENV1_MANAGED5_CLUSTER_NAME}" "${ENV1_MANAGED5_LOCATION}" "${ENV1_MANAGED3_PROJECT_ID}"
+  connect_cluster "${ENV1_MANAGED6_CLUSTER_NAME}" "${ENV1_MANAGED6_LOCATION}" "${ENV1_MANAGED3_PROJECT_ID}"
 
   ensure_gateway_api_crds "${cp_ctx}" "${ENV1_CP_CLUSTER_NAME}"
   ensure_gateway_api_crds "${m1_ctx}" "${ENV1_MANAGED1_CLUSTER_NAME}"
   ensure_gateway_api_crds "${m2_ctx}" "${ENV1_MANAGED2_CLUSTER_NAME}"
+  ensure_gateway_api_crds "${m5_ctx}" "${ENV1_MANAGED5_CLUSTER_NAME}"
+  ensure_gateway_api_crds "${m6_ctx}" "${ENV1_MANAGED6_CLUSTER_NAME}"
 
   ensure_argocd_repo_secrets "${cp_ctx}"
 
@@ -457,14 +483,20 @@ deploy_environment_1() {
   wait_for_rollouts_cluster "${cp_ctx}" "${ENV1_CP_CLUSTER_NAME}"
   wait_for_rollouts_cluster "${m1_ctx}" "${ENV1_MANAGED1_CLUSTER_NAME}"
   wait_for_rollouts_cluster "${m2_ctx}" "${ENV1_MANAGED2_CLUSTER_NAME}"
+  wait_for_rollouts_cluster "${m5_ctx}" "${ENV1_MANAGED5_CLUSTER_NAME}"
+  wait_for_rollouts_cluster "${m6_ctx}" "${ENV1_MANAGED6_CLUSTER_NAME}"
 
   wait_for_sample_workload "${cp_ctx}" "${ENV1_CP_CLUSTER_NAME}"
   wait_for_sample_workload "${m1_ctx}" "${ENV1_MANAGED1_CLUSTER_NAME}"
   wait_for_sample_workload "${m2_ctx}" "${ENV1_MANAGED2_CLUSTER_NAME}"
+  wait_for_sample_workload "${m5_ctx}" "${ENV1_MANAGED5_CLUSTER_NAME}"
+  wait_for_sample_workload "${m6_ctx}" "${ENV1_MANAGED6_CLUSTER_NAME}"
 
   validate_ambient_traffic "${cp_ctx}" "${ENV1_CP_CLUSTER_NAME}"
   validate_ambient_traffic "${m1_ctx}" "${ENV1_MANAGED1_CLUSTER_NAME}"
   validate_ambient_traffic "${m2_ctx}" "${ENV1_MANAGED2_CLUSTER_NAME}"
+  validate_ambient_traffic "${m5_ctx}" "${ENV1_MANAGED5_CLUSTER_NAME}"
+  validate_ambient_traffic "${m6_ctx}" "${ENV1_MANAGED6_CLUSTER_NAME}"
 }
 
 #######################################
@@ -527,6 +559,8 @@ print_summary() {
     echo "  Control Plane:  ${ENV1_CP_CLUSTER_NAME} (${ENV1_CP_LOCATION})"
     echo "  Managed 1:      ${ENV1_MANAGED1_CLUSTER_NAME} (${ENV1_MANAGED1_LOCATION})"
     echo "  Managed 2:      ${ENV1_MANAGED2_CLUSTER_NAME} (${ENV1_MANAGED2_LOCATION})"
+    echo "  Managed 5:      ${ENV1_MANAGED5_CLUSTER_NAME} (${ENV1_MANAGED5_LOCATION})"
+    echo "  Managed 6:      ${ENV1_MANAGED6_CLUSTER_NAME} (${ENV1_MANAGED6_LOCATION})"
     echo ""
     echo "  Argo CD Applications on Environment 1:"
     kubectl --context="${env1_cp_ctx}" -n "${ARGOCD_NAMESPACE}" get applications.argoproj.io

@@ -51,6 +51,18 @@ readonly DEFAULT_ENV1_MANAGED2_CLUSTER_NAME="gke-managed-cluster-2"
 readonly DEFAULT_ENV1_MANAGED2_LOCATION="europe-west1-b"
 readonly DEFAULT_ENV1_MANAGED2_SUBNET="internal-vpc1-europe-west1-gke2"
 
+# Managed Clusters 5 & 6 (mq-usecase-3, VPC1)
+readonly DEFAULT_ENV1_MANAGED3_PROJECT_ID="mq-usecase-3"
+readonly DEFAULT_ENV1_MANAGED3_VPC="mq-usecase-3-internal-vpc1"
+
+readonly DEFAULT_ENV1_MANAGED5_CLUSTER_NAME="gke-managed-cluster-5"
+readonly DEFAULT_ENV1_MANAGED5_LOCATION="europe-west1-b"
+readonly DEFAULT_ENV1_MANAGED5_SUBNET="internal-vpc1-europe-west1-gke"
+
+readonly DEFAULT_ENV1_MANAGED6_CLUSTER_NAME="gke-managed-cluster-6"
+readonly DEFAULT_ENV1_MANAGED6_LOCATION="europe-west1-b"
+readonly DEFAULT_ENV1_MANAGED6_SUBNET="internal-vpc1-europe-west1-gke2"
+
 # -----------------------------------------------------------------------------
 # Environment 2: Headless Control Plane (VPC2)
 # -----------------------------------------------------------------------------
@@ -163,10 +175,12 @@ Usage: $(basename "$0") [OPTIONS]
 
 Sets up Multi-Cluster GKE environments with Argo CD Control Planes:
 
-Environment 1 (Full Control Plane + 2 Managed Clusters in VPC1):
+Environment 1 (Full Control Plane + 4 Managed Clusters in VPC1):
   - Control Plane: 'argocd-control-plane' in 'mq-usecase-1', VPC 'mq-usecase-1-internal-vpc1', subnet 'internal-vpc1-europe-west1-gke'
   - Managed 1:     'gke-managed-cluster' in 'mq-usecase-2', VPC 'mq-usecase-2-internal-vpc1', subnet 'internal-vpc1-europe-west1-gke'
   - Managed 2:     'gke-managed-cluster-2' in 'mq-usecase-2', VPC 'mq-usecase-2-internal-vpc1', subnet 'internal-vpc1-europe-west1-gke2'
+  - Managed 5:     'gke-managed-cluster-5' in 'mq-usecase-3', VPC 'mq-usecase-3-internal-vpc1', subnet 'internal-vpc1-europe-west1-gke'
+  - Managed 6:     'gke-managed-cluster-6' in 'mq-usecase-3', VPC 'mq-usecase-3-internal-vpc1', subnet 'internal-vpc1-europe-west1-gke2'
 
 Environment 2 (Headless Control Plane + 2 Managed Clusters in VPC2):
   - Headless CP:   'argocd-control-plane-headless' in 'mq-usecase-1', VPC 'mq-usecase-1-internal-vpc2', subnet 'internal-vpc2-europe-west1-gke'
@@ -480,12 +494,15 @@ ensure_shared_gsa() {
       --display-name="Argo CD Cluster Manager Workload Identity"
   fi
 
-  local role
-  for role in roles/container.developer roles/container.clusterViewer; do
-    retry_cmd gcloud projects add-iam-policy-binding "${DEFAULT_ENV1_MANAGED_PROJECT_ID}" \
-      --member="serviceAccount:${gsa_email}" \
-      --role="${role}" \
-      --quiet >/dev/null
+  local target_projects=("${DEFAULT_ENV1_MANAGED_PROJECT_ID}" "${DEFAULT_ENV1_MANAGED3_PROJECT_ID}")
+  local proj role
+  for proj in "${target_projects[@]}"; do
+    for role in roles/container.developer roles/container.clusterViewer; do
+      retry_cmd gcloud projects add-iam-policy-binding "${proj}" \
+        --member="serviceAccount:${gsa_email}" \
+        --role="${role}" \
+        --quiet >/dev/null
+    done
   done
 }
 
@@ -716,6 +733,8 @@ setup_environment_1() {
   local cp_ctx="gke_${DEFAULT_ENV1_CP_PROJECT_ID}_${DEFAULT_ENV1_CP_LOCATION}_${DEFAULT_ENV1_CP_CLUSTER_NAME}"
   local m1_ctx="gke_${DEFAULT_ENV1_MANAGED_PROJECT_ID}_${DEFAULT_ENV1_MANAGED1_LOCATION}_${DEFAULT_ENV1_MANAGED1_CLUSTER_NAME}"
   local m2_ctx="gke_${DEFAULT_ENV1_MANAGED_PROJECT_ID}_${DEFAULT_ENV1_MANAGED2_LOCATION}_${DEFAULT_ENV1_MANAGED2_CLUSTER_NAME}"
+  local m5_ctx="gke_${DEFAULT_ENV1_MANAGED3_PROJECT_ID}_${DEFAULT_ENV1_MANAGED5_LOCATION}_${DEFAULT_ENV1_MANAGED5_CLUSTER_NAME}"
+  local m6_ctx="gke_${DEFAULT_ENV1_MANAGED3_PROJECT_ID}_${DEFAULT_ENV1_MANAGED6_LOCATION}_${DEFAULT_ENV1_MANAGED6_CLUSTER_NAME}"
 
   echo ""
   echo -e "${COLOR_GREEN}=====================================================================${COLOR_NC}"
@@ -725,14 +744,20 @@ setup_environment_1() {
   launch_cluster_creation "${DEFAULT_ENV1_CP_CLUSTER_NAME}" "${DEFAULT_ENV1_CP_LOCATION}" "${DEFAULT_ENV1_CP_SUBNET}" "${DEFAULT_ENV1_CP_VPC}" "${DEFAULT_ENV1_CP_PROJECT_ID}"
   launch_cluster_creation "${DEFAULT_ENV1_MANAGED1_CLUSTER_NAME}" "${DEFAULT_ENV1_MANAGED1_LOCATION}" "${DEFAULT_ENV1_MANAGED1_SUBNET}" "${DEFAULT_ENV1_MANAGED_VPC}" "${DEFAULT_ENV1_MANAGED_PROJECT_ID}"
   launch_cluster_creation "${DEFAULT_ENV1_MANAGED2_CLUSTER_NAME}" "${DEFAULT_ENV1_MANAGED2_LOCATION}" "${DEFAULT_ENV1_MANAGED2_SUBNET}" "${DEFAULT_ENV1_MANAGED_VPC}" "${DEFAULT_ENV1_MANAGED_PROJECT_ID}"
+  launch_cluster_creation "${DEFAULT_ENV1_MANAGED5_CLUSTER_NAME}" "${DEFAULT_ENV1_MANAGED5_LOCATION}" "${DEFAULT_ENV1_MANAGED5_SUBNET}" "${DEFAULT_ENV1_MANAGED3_VPC}" "${DEFAULT_ENV1_MANAGED3_PROJECT_ID}"
+  launch_cluster_creation "${DEFAULT_ENV1_MANAGED6_CLUSTER_NAME}" "${DEFAULT_ENV1_MANAGED6_LOCATION}" "${DEFAULT_ENV1_MANAGED6_SUBNET}" "${DEFAULT_ENV1_MANAGED3_VPC}" "${DEFAULT_ENV1_MANAGED3_PROJECT_ID}"
 
   wait_for_cluster_running "${DEFAULT_ENV1_CP_CLUSTER_NAME}" "${DEFAULT_ENV1_CP_LOCATION}" "${DEFAULT_ENV1_CP_PROJECT_ID}"
   wait_for_cluster_running "${DEFAULT_ENV1_MANAGED1_CLUSTER_NAME}" "${DEFAULT_ENV1_MANAGED1_LOCATION}" "${DEFAULT_ENV1_MANAGED_PROJECT_ID}"
   wait_for_cluster_running "${DEFAULT_ENV1_MANAGED2_CLUSTER_NAME}" "${DEFAULT_ENV1_MANAGED2_LOCATION}" "${DEFAULT_ENV1_MANAGED_PROJECT_ID}"
+  wait_for_cluster_running "${DEFAULT_ENV1_MANAGED5_CLUSTER_NAME}" "${DEFAULT_ENV1_MANAGED5_LOCATION}" "${DEFAULT_ENV1_MANAGED3_PROJECT_ID}"
+  wait_for_cluster_running "${DEFAULT_ENV1_MANAGED6_CLUSTER_NAME}" "${DEFAULT_ENV1_MANAGED6_LOCATION}" "${DEFAULT_ENV1_MANAGED3_PROJECT_ID}"
 
   fetch_cluster_credentials "${DEFAULT_ENV1_CP_CLUSTER_NAME}" "${DEFAULT_ENV1_CP_LOCATION}" "${DEFAULT_ENV1_CP_PROJECT_ID}"
   fetch_cluster_credentials "${DEFAULT_ENV1_MANAGED1_CLUSTER_NAME}" "${DEFAULT_ENV1_MANAGED1_LOCATION}" "${DEFAULT_ENV1_MANAGED_PROJECT_ID}"
   fetch_cluster_credentials "${DEFAULT_ENV1_MANAGED2_CLUSTER_NAME}" "${DEFAULT_ENV1_MANAGED2_LOCATION}" "${DEFAULT_ENV1_MANAGED_PROJECT_ID}"
+  fetch_cluster_credentials "${DEFAULT_ENV1_MANAGED5_CLUSTER_NAME}" "${DEFAULT_ENV1_MANAGED5_LOCATION}" "${DEFAULT_ENV1_MANAGED3_PROJECT_ID}"
+  fetch_cluster_credentials "${DEFAULT_ENV1_MANAGED6_CLUSTER_NAME}" "${DEFAULT_ENV1_MANAGED6_LOCATION}" "${DEFAULT_ENV1_MANAGED3_PROJECT_ID}"
 
   install_argocd_full_control_plane
   configure_argocd_webhook "${cp_ctx}" "argocd-cp1-webhook-ip"
@@ -740,10 +765,14 @@ setup_environment_1() {
 
   grant_managed_rbac "${m1_ctx}"
   grant_managed_rbac "${m2_ctx}"
+  grant_managed_rbac "${m5_ctx}"
+  grant_managed_rbac "${m6_ctx}"
 
   register_in_cluster_metadata "${cp_ctx}" "${DEFAULT_ENV1_CP_CLUSTER_NAME}" "${DEFAULT_ENV1_CP_PROJECT_ID}"
   register_managed_cluster "${cp_ctx}" "${DEFAULT_ENV1_MANAGED1_CLUSTER_NAME}" "${DEFAULT_ENV1_MANAGED1_LOCATION}" "${DEFAULT_ENV1_MANAGED_PROJECT_ID}"
   register_managed_cluster "${cp_ctx}" "${DEFAULT_ENV1_MANAGED2_CLUSTER_NAME}" "${DEFAULT_ENV1_MANAGED2_LOCATION}" "${DEFAULT_ENV1_MANAGED_PROJECT_ID}"
+  register_managed_cluster "${cp_ctx}" "${DEFAULT_ENV1_MANAGED5_CLUSTER_NAME}" "${DEFAULT_ENV1_MANAGED5_LOCATION}" "${DEFAULT_ENV1_MANAGED3_PROJECT_ID}"
+  register_managed_cluster "${cp_ctx}" "${DEFAULT_ENV1_MANAGED6_CLUSTER_NAME}" "${DEFAULT_ENV1_MANAGED6_LOCATION}" "${DEFAULT_ENV1_MANAGED3_PROJECT_ID}"
 }
 
 #######################################
@@ -806,6 +835,8 @@ print_summary() {
     echo "  Public Webhook: https://${cp1_webhook_ip}/api/webhook"
     echo "  Managed 1:      ${DEFAULT_ENV1_MANAGED1_CLUSTER_NAME} (${DEFAULT_ENV1_MANAGED1_LOCATION}, ${DEFAULT_ENV1_MANAGED_PROJECT_ID}, subnet: ${DEFAULT_ENV1_MANAGED1_SUBNET})"
     echo "  Managed 2:      ${DEFAULT_ENV1_MANAGED2_CLUSTER_NAME} (${DEFAULT_ENV1_MANAGED2_LOCATION}, ${DEFAULT_ENV1_MANAGED_PROJECT_ID}, subnet: ${DEFAULT_ENV1_MANAGED2_SUBNET})"
+    echo "  Managed 5:      ${DEFAULT_ENV1_MANAGED5_CLUSTER_NAME} (${DEFAULT_ENV1_MANAGED5_LOCATION}, ${DEFAULT_ENV1_MANAGED3_PROJECT_ID}, subnet: ${DEFAULT_ENV1_MANAGED5_SUBNET})"
+    echo "  Managed 6:      ${DEFAULT_ENV1_MANAGED6_CLUSTER_NAME} (${DEFAULT_ENV1_MANAGED6_LOCATION}, ${DEFAULT_ENV1_MANAGED3_PROJECT_ID}, subnet: ${DEFAULT_ENV1_MANAGED6_SUBNET})"
     echo "  Registered Clusters in Environment 1:"
     kubectl config set-context "${env1_cp_ctx}" --namespace="${ARGOCD_NAMESPACE}" >/dev/null 2>&1 || true
     argocd cluster list --core --kube-context "${env1_cp_ctx}" 2>/dev/null || true
@@ -840,6 +871,8 @@ delete_clusters() {
       "${DEFAULT_ENV1_CP_CLUSTER_NAME},${DEFAULT_ENV1_CP_LOCATION},${DEFAULT_ENV1_CP_PROJECT_ID}"
       "${DEFAULT_ENV1_MANAGED1_CLUSTER_NAME},${DEFAULT_ENV1_MANAGED1_LOCATION},${DEFAULT_ENV1_MANAGED_PROJECT_ID}"
       "${DEFAULT_ENV1_MANAGED2_CLUSTER_NAME},${DEFAULT_ENV1_MANAGED2_LOCATION},${DEFAULT_ENV1_MANAGED_PROJECT_ID}"
+      "${DEFAULT_ENV1_MANAGED5_CLUSTER_NAME},${DEFAULT_ENV1_MANAGED5_LOCATION},${DEFAULT_ENV1_MANAGED3_PROJECT_ID}"
+      "${DEFAULT_ENV1_MANAGED6_CLUSTER_NAME},${DEFAULT_ENV1_MANAGED6_LOCATION},${DEFAULT_ENV1_MANAGED3_PROJECT_ID}"
     )
   fi
 
