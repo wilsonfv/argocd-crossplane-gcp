@@ -35,6 +35,7 @@ CLUSTER_NAME="${CLUSTER_NAME:-${DEFAULT_CLUSTER_NAME}}"
 LOCATION="${LOCATION:-${DEFAULT_LOCATION}}"
 ARGOCD_NAMESPACE="${ARGOCD_NAMESPACE:-${DEFAULT_ARGOCD_NAMESPACE}}"
 LOCAL_PORT="${LOCAL_PORT:-${DEFAULT_LOCAL_PORT}}"
+CHECK_ONLY="${CHECK_ONLY:-false}"
 
 PF_PID=""
 SSL_KEY=""
@@ -173,6 +174,10 @@ parse_flags() {
       --port)
         LOCAL_PORT="$2"
         shift 2
+        ;;
+      --check|--test)
+        CHECK_ONLY="true"
+        shift
         ;;
       -h|--help)
         usage
@@ -313,6 +318,24 @@ main() {
   echo -e "       Press ${COLOR_BOLD}Ctrl+C${COLOR_NC} at any time to stop port-forwarding."
   echo -e "${COLOR_GREEN}=====================================================================${COLOR_NC}"
   echo ""
+
+  if [[ "${CHECK_ONLY:-false}" == "true" ]]; then
+    log_info "Testing Argo CD API session authentication with admin credentials..."
+    python3 -c "
+import urllib.request, ssl, json
+ctx = ssl.create_default_context()
+ctx.check_hostname = False
+ctx.verify_mode = ssl.CERT_NONE
+data = json.dumps({'username': 'admin', 'password': '${admin_password}'}).encode('utf-8')
+req = urllib.request.Request('https://127.0.0.1:${internal_port}/api/v1/session', data=data, headers={'Content-Type': 'application/json'})
+with urllib.request.urlopen(req, context=ctx, timeout=10) as r:
+    tok = json.loads(r.read())['token']
+    assert tok and len(tok) > 10
+    print('Token successfully retrieved! Session authenticated.')
+"
+    log_success "Argo CD Web UI and API authentication check PASSED!"
+    return 0
+  fi
 
   # Run auto-login proxy in python3
   python3 -c "

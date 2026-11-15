@@ -356,7 +356,8 @@ ensure_argocd_repo_secrets() {
 deploy_root_app() {
   local cp_context="$1"
 
-  log_info "[${cp_context}] Applying Root Application and ApplicationSets from argocd/root-app.yaml..."
+  log_info "[${cp_context}] Applying Root Application and ApplicationSets..."
+  kubectl --context="${cp_context}" apply -n "${ARGOCD_NAMESPACE}" -k argocd/applicationsets >/dev/null
   kubectl --context="${cp_context}" apply -n "${ARGOCD_NAMESPACE}" -f argocd/root-app.yaml >/dev/null
   log_success "[${cp_context}] Root Application applied. ApplicationSet generator active."
 }

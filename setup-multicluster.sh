@@ -329,7 +329,7 @@ wait_for_cluster_running() {
   log_info "Waiting for cluster '${cluster_name}' in ${location} (project '${project_id}') to reach RUNNING status..."
   while true; do
     local status
-    status="$(gcloud container clusters describe "${cluster_name}" "${loc_flag}" --project "${project_id}" --format="value(status)" 2>/dev/null || echo "PENDING")"
+    status="$(gcloud container clusters describe "${cluster_name}" "${loc_flag}" --project "${project_id}" --format="value(status)" 2>/dev/null || true)"
     if [[ "${status}" == "RUNNING" ]]; then
       log_success "Cluster '${cluster_name}' is RUNNING."
       break
