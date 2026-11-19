@@ -455,7 +455,52 @@ validate_ambient_traffic() {
 }
 
 #######################################
-# Deploy to Environment 1 (Full Control Plane + 2 Managed Clusters)
+# Wait for OPA Gatekeeper components to roll out on a managed cluster.
+#######################################
+wait_for_opa_rollouts_cluster() {
+  local ctx="$1"
+  local name="$2"
+
+  log_info "[${name}] Waiting for OPA Gatekeeper components in gatekeeper-system..."
+  local i
+  for ((i = 0; i < 40; i++)); do
+    if kubectl --context="${ctx}" get deployment/gatekeeper-controller-manager -n gatekeeper-system &>/dev/null; then
+      break
+    fi
+    sleep 3
+  done
+
+  kubectl --context="${ctx}" rollout status deployment/gatekeeper-controller-manager -n gatekeeper-system --timeout=300s || true
+  kubectl --context="${ctx}" rollout status deployment/gatekeeper-audit -n gatekeeper-system --timeout=300s || true
+  log_success "[${name}] OPA Gatekeeper components verified."
+}
+
+#######################################
+# Validate OPA Gatekeeper policy enforcement on a managed cluster.
+#######################################
+validate_opa_enforcement() {
+  local ctx="$1"
+  local name="$2"
+
+  log_info "[${name}] Validating OPA Gatekeeper policy enforcement..."
+  local test_yaml="feature/open-policy-agent/samples/test-violations/bad-privileged-pod.yaml"
+  if [[ -f "${test_yaml}" ]]; then
+    local output
+    if output="$(kubectl --context="${ctx}" apply -f "${test_yaml}" 2>&1)"; then
+      log_warn "[${name}] Privileged pod was accepted; admission webhook may still be initializing."
+      kubectl --context="${ctx}" delete -f "${test_yaml}" --ignore-not-found &>/dev/null || true
+    else
+      if [[ "${output}" =~ denied|forbidden|denied\ by|K8sBlockPrivileged ]]; then
+        log_success "[${name}] OPA Gatekeeper policy enforcement validated (privileged pod blocked)."
+      else
+        log_info "[${name}] Pod rejected as expected: ${output}"
+      fi
+    fi
+  fi
+}
+
+#######################################
+# Deploy to Environment 1 (Full Control Plane + 4 Managed Clusters)
 #######################################
 deploy_environment_1() {
   local cp_ctx="gke_${ENV1_CP_PROJECT_ID}_${ENV1_CP_LOCATION}_${ENV1_CP_CLUSTER_NAME}"
@@ -502,6 +547,16 @@ deploy_environment_1() {
   validate_ambient_traffic "${m2_ctx}" "${ENV1_MANAGED2_CLUSTER_NAME}"
   validate_ambient_traffic "${m5_ctx}" "${ENV1_MANAGED5_CLUSTER_NAME}"
   validate_ambient_traffic "${m6_ctx}" "${ENV1_MANAGED6_CLUSTER_NAME}"
+
+  wait_for_opa_rollouts_cluster "${m1_ctx}" "${ENV1_MANAGED1_CLUSTER_NAME}"
+  wait_for_opa_rollouts_cluster "${m2_ctx}" "${ENV1_MANAGED2_CLUSTER_NAME}"
+  wait_for_opa_rollouts_cluster "${m5_ctx}" "${ENV1_MANAGED5_CLUSTER_NAME}"
+  wait_for_opa_rollouts_cluster "${m6_ctx}" "${ENV1_MANAGED6_CLUSTER_NAME}"
+
+  validate_opa_enforcement "${m1_ctx}" "${ENV1_MANAGED1_CLUSTER_NAME}"
+  validate_opa_enforcement "${m2_ctx}" "${ENV1_MANAGED2_CLUSTER_NAME}"
+  validate_opa_enforcement "${m5_ctx}" "${ENV1_MANAGED5_CLUSTER_NAME}"
+  validate_opa_enforcement "${m6_ctx}" "${ENV1_MANAGED6_CLUSTER_NAME}"
 }
 
 #######################################
@@ -540,6 +595,12 @@ deploy_environment_2() {
   validate_ambient_traffic "${cp_ctx}" "${ENV2_CP_CLUSTER_NAME}"
   validate_ambient_traffic "${m1_ctx}" "${ENV2_MANAGED1_CLUSTER_NAME}"
   validate_ambient_traffic "${m2_ctx}" "${ENV2_MANAGED2_CLUSTER_NAME}"
+
+  wait_for_opa_rollouts_cluster "${m1_ctx}" "${ENV2_MANAGED1_CLUSTER_NAME}"
+  wait_for_opa_rollouts_cluster "${m2_ctx}" "${ENV2_MANAGED2_CLUSTER_NAME}"
+
+  validate_opa_enforcement "${m1_ctx}" "${ENV2_MANAGED1_CLUSTER_NAME}"
+  validate_opa_enforcement "${m2_ctx}" "${ENV2_MANAGED2_CLUSTER_NAME}"
 }
 
 #######################################

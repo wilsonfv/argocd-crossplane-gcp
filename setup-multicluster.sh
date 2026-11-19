@@ -559,7 +559,7 @@ grant_managed_rbac() {
   local gsa_email="${ARGOCD_GSA_NAME}@${DEFAULT_ENV1_CP_PROJECT_ID}.iam.gserviceaccount.com"
   local namespaces=("$@")
   if [[ ${#namespaces[@]} -eq 0 ]]; then
-    namespaces=("default" "istio-system" "apps-ambient")
+    namespaces=("default" "istio-system" "apps-ambient" "gatekeeper-system" "apps-opa")
   fi
 
   log_info "Granting namespace-level admin RBAC to GSA on ${managed_context} (namespaces: ${namespaces[*]})..."

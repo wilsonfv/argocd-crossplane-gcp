@@ -18,10 +18,14 @@ Automated scripts and declarative GitOps source-of-truth configurations followin
 │   ├── applicationsets/       # ApplicationSets (Matrix & Cluster generators)
 │   └── manifests/             # Declarative Argo CD installation & RBAC patches
 ├── feature/                   # Root folder for platform features
-│   └── istio/                 # Istio Service Mesh configuration
-│       ├── charts/            # Helm charts (istio-base, istio-cni, istiod, istio-ztunnel, istio-waypoint)
-│       ├── policies/          # Ambient authorization, telemetry & network policies
-│       └── samples/           # Sample workloads (echo-server, sleep-client, waypoint-gateway)
+│   ├── istio/                 # Istio Service Mesh configuration
+│   │   ├── charts/            # Helm charts (istio-base, istio-cni, istiod, istio-ztunnel, istio-waypoint)
+│   │   ├── policies/          # Ambient authorization, telemetry & network policies
+│   │   └── samples/           # Sample workloads (echo-server, sleep-client, waypoint-gateway)
+│   └── open-policy-agent/     # Open Policy Agent (Gatekeeper) configuration
+│       ├── charts/            # Helm chart for OPA Gatekeeper
+│       ├── policies/          # ConstraintTemplates and Constraints (labels, privileged containers)
+│       └── samples/           # Sample compliant workload and violation test cases
 └── README.md
 ```
 
@@ -119,6 +123,7 @@ Manual access commands:
 
 Argo CD application manifests have been generalized in this repository using **Root App** (App-of-Apps) and **ApplicationSets**:
 - **`argocd/root-app.yaml`**: Root Application deployed to the control plane, managing the ApplicationSets.
+- **`argocd/applicationsets/open-policy-agent-appset.yaml`**: Uses a Matrix generator targeting managed GKE clusters to deploy OPA Gatekeeper (`charts/gatekeeper`), policy constraints (`policies/`), and sample workloads (`samples/`).
 - **`argocd/applicationsets/cluster-configs-scm-appset.yaml`**: Uses Argo CD's **SCM Provider Generator** (`scmProvider.github`) combined with Git Directory generator in a Matrix to dynamically discover and manage all per-project repositories matching `^argocd-mq-usecase-.*` (`argocd-mq-usecase-1`, `argocd-mq-usecase-2`, `argocd-mq-usecase-3`). Any new repo or cluster folder is automatically discovered and reconciled without changing manifests!
 - **`argocd/applicationsets/istio-ambient-appset.yaml`**: Uses a Matrix generator (Clusters × Apps) to dynamically deploy all 6 Ambient mesh components (`istio-base`, `istio-cni`, `istiod`, `istio-ztunnel`, `istio-policies`, `ambient-samples`) to each registered cluster without duplicated manifests.
 - **`argocd/applicationsets/github-scm-proxy.yaml`**: Lightweight in-cluster proxy facilitating seamless GitHub API user repository discovery for the SCM Provider.

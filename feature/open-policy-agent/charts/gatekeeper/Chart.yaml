@@ -1,0 +1,10 @@
+apiVersion: v2
+name: gatekeeper
+description: Helm chart wrapping OPA Gatekeeper for GKE managed clusters
+type: application
+version: 3.23.1
+appVersion: v3.23.1
+dependencies:
+  - name: gatekeeper
+    version: 3.23.1
+    repository: https://open-policy-agent.github.io/gatekeeper/charts

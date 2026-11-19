@@ -1,0 +1,10 @@
+# Demonstrates policy violation: Blocked by K8sRequiredLabels constraint (missing 'app' label)
+apiVersion: v1
+kind: Pod
+metadata:
+  name: missing-label-pod-violation
+  namespace: apps-opa
+spec:
+  containers:
+    - name: nginx
+      image: nginx:alpine

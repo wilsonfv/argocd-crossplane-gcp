@@ -1,0 +1,35 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: compliant-app
+  namespace: apps-opa
+  labels:
+    app: compliant-app
+    app.kubernetes.io/name: compliant-app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: compliant-app
+  template:
+    metadata:
+      labels:
+        app: compliant-app
+    spec:
+      containers:
+        - name: echo-server
+          image: registry.k8s.io/e2e-test-images/agnhost:2.53
+          command: ["/agnhost", "netexec", "--http-port=8080"]
+          ports:
+            - containerPort: 8080
+          securityContext:
+            allowPrivilegeEscalation: false
+            privileged: false
+            readOnlyRootFilesystem: false
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 100m
+              memory: 128Mi

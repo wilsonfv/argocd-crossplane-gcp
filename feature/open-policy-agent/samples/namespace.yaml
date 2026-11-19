@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: apps-opa
+  labels:
+    app.kubernetes.io/name: apps-opa
+    open-policy-agent: enabled
