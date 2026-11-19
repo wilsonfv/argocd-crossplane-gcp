@@ -7,15 +7,7 @@ spec:
   generators:
     - matrix:
         generators:
-          - clusters:
-              selector:
-                matchExpressions:
-                  - key: cluster-name
-                    operator: NotIn
-                    values:
-                      - argocd-control-plane
-                      - argocd-control-plane-headless
-                      - in-cluster
+          - clusters: {}
           - list:
               elements:
                 - app: opa-gatekeeper

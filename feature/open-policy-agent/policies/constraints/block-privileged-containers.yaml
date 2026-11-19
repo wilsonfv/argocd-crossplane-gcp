@@ -13,3 +13,4 @@ spec:
       - "kube-system"
       - "gatekeeper-system"
       - "istio-system"
+      - "argocd"

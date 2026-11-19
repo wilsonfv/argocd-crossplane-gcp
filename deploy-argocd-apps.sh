@@ -548,11 +548,13 @@ deploy_environment_1() {
   validate_ambient_traffic "${m5_ctx}" "${ENV1_MANAGED5_CLUSTER_NAME}"
   validate_ambient_traffic "${m6_ctx}" "${ENV1_MANAGED6_CLUSTER_NAME}"
 
+  wait_for_opa_rollouts_cluster "${cp_ctx}" "${ENV1_CP_CLUSTER_NAME}"
   wait_for_opa_rollouts_cluster "${m1_ctx}" "${ENV1_MANAGED1_CLUSTER_NAME}"
   wait_for_opa_rollouts_cluster "${m2_ctx}" "${ENV1_MANAGED2_CLUSTER_NAME}"
   wait_for_opa_rollouts_cluster "${m5_ctx}" "${ENV1_MANAGED5_CLUSTER_NAME}"
   wait_for_opa_rollouts_cluster "${m6_ctx}" "${ENV1_MANAGED6_CLUSTER_NAME}"
 
+  validate_opa_enforcement "${cp_ctx}" "${ENV1_CP_CLUSTER_NAME}"
   validate_opa_enforcement "${m1_ctx}" "${ENV1_MANAGED1_CLUSTER_NAME}"
   validate_opa_enforcement "${m2_ctx}" "${ENV1_MANAGED2_CLUSTER_NAME}"
   validate_opa_enforcement "${m5_ctx}" "${ENV1_MANAGED5_CLUSTER_NAME}"
@@ -596,9 +598,11 @@ deploy_environment_2() {
   validate_ambient_traffic "${m1_ctx}" "${ENV2_MANAGED1_CLUSTER_NAME}"
   validate_ambient_traffic "${m2_ctx}" "${ENV2_MANAGED2_CLUSTER_NAME}"
 
+  wait_for_opa_rollouts_cluster "${cp_ctx}" "${ENV2_CP_CLUSTER_NAME}"
   wait_for_opa_rollouts_cluster "${m1_ctx}" "${ENV2_MANAGED1_CLUSTER_NAME}"
   wait_for_opa_rollouts_cluster "${m2_ctx}" "${ENV2_MANAGED2_CLUSTER_NAME}"
 
+  validate_opa_enforcement "${cp_ctx}" "${ENV2_CP_CLUSTER_NAME}"
   validate_opa_enforcement "${m1_ctx}" "${ENV2_MANAGED1_CLUSTER_NAME}"
   validate_opa_enforcement "${m2_ctx}" "${ENV2_MANAGED2_CLUSTER_NAME}"
 }
