@@ -14,7 +14,6 @@ spec:
         kinds: ["Deployment", "StatefulSet", "DaemonSet"]
     namespaces:
       - "apps-opa"
-      - "apps-ambient"
   parameters:
     labels:
       - "app"
