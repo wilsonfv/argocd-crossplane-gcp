@@ -7,4 +7,4 @@ appVersion: 1.30.7
 dependencies:
   - name: base
     version: 1.30.7
-    repository: https://istio-release.storage.googleapis.com/charts
+    repository: https://blob.istio.io/istio-release/charts
