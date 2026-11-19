@@ -485,16 +485,28 @@ validate_opa_enforcement() {
   log_info "[${name}] Validating OPA Gatekeeper policy enforcement..."
   local test_yaml="feature/open-policy-agent/samples/test-violations/bad-privileged-pod.yaml"
   if [[ -f "${test_yaml}" ]]; then
-    local output
-    if output="$(kubectl --context="${ctx}" apply -f "${test_yaml}" 2>&1)"; then
-      log_warn "[${name}] Privileged pod was accepted; admission webhook may still be initializing."
-      kubectl --context="${ctx}" delete -f "${test_yaml}" --ignore-not-found &>/dev/null || true
-    else
-      if [[ "${output}" =~ denied|forbidden|denied\ by|K8sBlockPrivileged ]]; then
-        log_success "[${name}] OPA Gatekeeper policy enforcement validated (privileged pod blocked)."
+    kubectl --context="${ctx}" create namespace apps-opa --dry-run=client -o yaml | kubectl --context="${ctx}" apply -f - >/dev/null
+
+    local attempt=1 max_attempts=15 blocked=false output=""
+    while (( attempt <= max_attempts )); do
+      if output="$(kubectl --context="${ctx}" apply -f "${test_yaml}" 2>&1)"; then
+        kubectl --context="${ctx}" delete -f "${test_yaml}" --ignore-not-found &>/dev/null || true
+        sleep 4
+        (( attempt++ ))
       else
-        log_info "[${name}] Pod rejected as expected: ${output}"
+        if [[ "${output}" =~ denied|forbidden|denied\ by|K8sBlockPrivileged|block-privileged-containers ]]; then
+          log_success "[${name}] OPA Gatekeeper policy enforcement validated (privileged pod blocked)."
+          blocked=true
+          break
+        else
+          sleep 4
+          (( attempt++ ))
+        fi
       fi
+    done
+
+    if [[ "${blocked}" != "true" ]]; then
+      log_warn "[${name}] Privileged pod was not blocked after ${max_attempts} attempts: ${output:-no response}"
     fi
   fi
 }
