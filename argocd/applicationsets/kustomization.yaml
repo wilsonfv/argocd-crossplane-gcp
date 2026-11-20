@@ -4,4 +4,5 @@ resources:
   - github-scm-proxy.yaml
   - cluster-configs-scm-appset.yaml
   - istio-ambient-appset.yaml
+  - istio-manifests-appset.yaml
   - open-policy-agent-appset.yaml

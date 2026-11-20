@@ -1,0 +1,14 @@
+profile: ambient
+cni:
+  ambient:
+    enabled: true
+    dnsCapture: true
+    ipv6: true
+  cniBinDir: /home/kubernetes/bin
+  cniConfDir: /etc/cni/net.d
+  cniNetnsDir: /var/run/netns
+  excludeNamespaces:
+    - kube-system
+    - istio-system
+    - gatekeeper-system
+    - argocd

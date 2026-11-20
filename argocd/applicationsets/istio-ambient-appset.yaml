@@ -7,30 +7,38 @@ spec:
   generators:
     - matrix:
         generators:
-          - clusters: {}
+          - scmProvider:
+              cloneProtocol: https
+              github:
+                api: http://github-scm-proxy.argocd.svc.cluster.local
+                organization: wilsonfv
+                tokenRef:
+                  secretName: scm-github-token
+                  key: token
+              filters:
+                - repositoryMatch: "^argocd-mq-usecase-.*"
+          - git:
+              repoURL: "{{url}}"
+              revision: "{{branch}}"
+              files:
+                - path: "*/versions.yaml"
           - list:
               elements:
                 - app: istio-base
-                  path: feature/istio/charts/istio-base
+                  chart: base
                   wave: "0"
                 - app: istio-cni
-                  path: feature/istio/charts/istio-cni
+                  chart: cni
                   wave: "1"
                 - app: istiod
-                  path: feature/istio/charts/istiod
+                  chart: istiod
                   wave: "1"
                 - app: istio-ztunnel
-                  path: feature/istio/charts/istio-ztunnel
+                  chart: ztunnel
                   wave: "2"
-                - app: istio-policies
-                  path: feature/istio/policies
-                  wave: "3"
-                - app: ambient-samples
-                  path: feature/istio/samples
-                  wave: "4"
   template:
     metadata:
-      name: "{{app}}-{{name}}"
+      name: "{{app}}-{{path.basename}}"
       namespace: argocd
       annotations:
         argocd.argoproj.io/sync-wave: "{{wave}}"
@@ -38,12 +46,18 @@ spec:
         - resources-finalizer.argocd.argoproj.io
     spec:
       project: default
-      source:
-        repoURL: https://github.com/wilsonfv/argocd-crossplane-gcp.git
-        targetRevision: HEAD
-        path: "{{path}}"
+      sources:
+        - repoURL: https://blob.istio.io/istio-release/charts
+          chart: "{{chart}}"
+          targetRevision: "{{versions.istio}}"
+          helm:
+            valueFiles:
+              - $valuesRepo/feature/istio/values/{{chart}}-values.yaml
+        - repoURL: https://github.com/wilsonfv/argocd-crossplane-gcp.git
+          targetRevision: HEAD
+          ref: valuesRepo
       destination:
-        name: "{{name}}"
+        name: "{{path.basename}}"
         namespace: istio-system
       syncPolicy:
         automated:

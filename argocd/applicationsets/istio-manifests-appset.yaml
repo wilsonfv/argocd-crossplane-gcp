@@ -1,0 +1,57 @@
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: istio-ambient-manifests
+  namespace: argocd
+spec:
+  generators:
+    - matrix:
+        generators:
+          - scmProvider:
+              cloneProtocol: https
+              github:
+                api: http://github-scm-proxy.argocd.svc.cluster.local
+                organization: wilsonfv
+                tokenRef:
+                  secretName: scm-github-token
+                  key: token
+              filters:
+                - repositoryMatch: "^argocd-mq-usecase-.*"
+          - git:
+              repoURL: "{{url}}"
+              revision: "{{branch}}"
+              directories:
+                - path: "*"
+          - list:
+              elements:
+                - app: istio-policies
+                  path: feature/istio/policies
+                  wave: "3"
+                - app: ambient-samples
+                  path: feature/istio/samples
+                  wave: "4"
+  template:
+    metadata:
+      name: "{{app}}-{{path.basename}}"
+      namespace: argocd
+      annotations:
+        argocd.argoproj.io/sync-wave: "{{wave}}"
+      finalizers:
+        - resources-finalizer.argocd.argoproj.io
+    spec:
+      project: default
+      source:
+        repoURL: https://github.com/wilsonfv/argocd-crossplane-gcp.git
+        targetRevision: HEAD
+        path: "{{path}}"
+      destination:
+        name: "{{path.basename}}"
+        namespace: istio-system
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+          - CreateNamespace=true
+          - ServerSideApply=true
+          - RespectIgnoreDifferences=true
