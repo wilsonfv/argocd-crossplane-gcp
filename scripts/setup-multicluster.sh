@@ -565,15 +565,14 @@ grant_managed_rbac() {
   log_info "Granting namespace-level admin RBAC to GSA on ${managed_context} (namespaces: ${namespaces[*]})..."
 
   # Grant cluster-scoped permissions required for Istio CRDs, webhooks and clusterroles
-  cat <<EOF | kubectl --context="${managed_context}" apply -f - >/dev/null
-apiVersion: rbac.authorization.k8s.io/v1
+  local full_manifest="apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
   name: argocd-workload-identity-cluster-scoped
 rules:
-  - apiGroups: ["*"]
-    resources: ["*"]
-    verbs: ["*"]
+  - apiGroups: [\"*\"]
+    resources: [\"*\"]
+    verbs: [\"*\"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -587,17 +586,33 @@ subjects:
   - kind: User
     name: ${gsa_email}
     apiGroup: rbac.authorization.k8s.io
-EOF
+"
 
   local ns
   for ns in "${namespaces[@]}"; do
-    kubectl --context="${managed_context}" create namespace "${ns}" --dry-run=client -o yaml | kubectl --context="${managed_context}" apply -f - >/dev/null
-    kubectl --context="${managed_context}" create rolebinding argocd-workload-identity-admin \
-      --clusterrole=admin \
-      --user="${gsa_email}" \
-      --namespace="${ns}" \
-      --dry-run=client -o yaml | kubectl --context="${managed_context}" apply -f - >/dev/null
+    full_manifest+="---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ${ns}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: argocd-workload-identity-admin
+  namespace: ${ns}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: admin
+subjects:
+  - kind: User
+    name: ${gsa_email}
+    apiGroup: rbac.authorization.k8s.io
+"
   done
+
+  echo "${full_manifest}" | kubectl --context="${managed_context}" apply -f - >/dev/null
 }
 
 #######################################

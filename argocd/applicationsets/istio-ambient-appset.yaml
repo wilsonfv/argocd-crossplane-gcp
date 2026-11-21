@@ -7,21 +7,23 @@ spec:
   generators:
     - matrix:
         generators:
-          - scmProvider:
-              cloneProtocol: https
-              github:
-                api: http://github-scm-proxy.argocd.svc.cluster.local
-                organization: wilsonfv
-                tokenRef:
-                  secretName: scm-github-token
-                  key: token
-              filters:
-                - repositoryMatch: "^argocd-mq-usecase-.*"
-          - git:
-              repoURL: "{{url}}"
-              revision: "{{branch}}"
-              files:
-                - path: "*/versions.yaml"
+          - matrix:
+              generators:
+                - scmProvider:
+                    cloneProtocol: https
+                    github:
+                      api: http://github-scm-proxy.argocd.svc.cluster.local
+                      organization: wilsonfv
+                      tokenRef:
+                        secretName: scm-github-token
+                        key: token
+                    filters:
+                      - repositoryMatch: "^argocd-mq-usecase-.*"
+                - git:
+                    repoURL: "{{url}}"
+                    revision: "{{branch}}"
+                    files:
+                      - path: "*/versions.yaml"
           - list:
               elements:
                 - app: istio-base
