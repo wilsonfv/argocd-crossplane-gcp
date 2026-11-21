@@ -24,6 +24,12 @@ spec:
                     revision: "{{branch}}"
                     files:
                       - path: "*/versions.yaml"
+                      - path: "gke-managed-cluster-3/versions.yaml"
+                        exclude: true
+                      - path: "gke-managed-cluster-4/versions.yaml"
+                        exclude: true
+                      - path: "argocd-control-plane-headless/versions.yaml"
+                        exclude: true
           - list:
               elements:
                 - app: istio-base

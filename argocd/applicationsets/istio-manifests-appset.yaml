@@ -24,6 +24,12 @@ spec:
                     revision: "{{branch}}"
                     directories:
                       - path: "*"
+                      - path: "gke-managed-cluster-3"
+                        exclude: true
+                      - path: "gke-managed-cluster-4"
+                        exclude: true
+                      - path: "argocd-control-plane-headless"
+                        exclude: true
           - list:
               elements:
                 - app: istio-policies
