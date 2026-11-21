@@ -19,6 +19,9 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
+readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+readonly REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
 # -----------------------------------------------------------------------------
 # Global Constants and Defaults
 # -----------------------------------------------------------------------------
@@ -383,8 +386,8 @@ deploy_root_app() {
   local cp_context="$1"
 
   log_info "[${cp_context}] Applying Root Application and ApplicationSets..."
-  kubectl --context="${cp_context}" apply -n "${ARGOCD_NAMESPACE}" -k argocd/applicationsets >/dev/null
-  kubectl --context="${cp_context}" apply -n "${ARGOCD_NAMESPACE}" -f argocd/root-app.yaml >/dev/null
+  kubectl --context="${cp_context}" apply -n "${ARGOCD_NAMESPACE}" -k "${REPO_ROOT}/argocd/applicationsets" >/dev/null
+  kubectl --context="${cp_context}" apply -n "${ARGOCD_NAMESPACE}" -f "${REPO_ROOT}/argocd/root-app.yaml" >/dev/null
   log_success "[${cp_context}] Root Application applied. ApplicationSet generator active."
 }
 

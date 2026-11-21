@@ -8,15 +8,16 @@ Automated scripts and declarative GitOps source-of-truth configurations followin
 
 ```text
 .
-├── setup-multicluster.sh      # Provisions 6-cluster GKE & configures Argo CD via Workload Identity
-├── install-crossplane.sh      # Installs latest Crossplane on GKE via Helm
-├── deploy-argocd-apps.sh      # Deploys Istio Ambient Mode across all 6 clusters via Root App & ApplicationSets
-├── setup-github-webhook.sh    # Configures GitHub App / Webhook subscription for automated GitOps push sync
-├── access-argocd-ui.sh        # Port-forwards Argo CD Web UI & displays admin credentials
 ├── argocd/                    # Argo CD configurations, ApplicationSets and manifests
 │   ├── root-app.yaml          # Root Application
 │   ├── applicationsets/       # ApplicationSets (Matrix & SCM Provider generators)
 │   └── manifests/             # Declarative Argo CD installation & RBAC patches
+├── scripts/                   # Platform orchestration & deployment automation scripts
+│   ├── setup-multicluster.sh  # Provisions 8-cluster GKE & configures Argo CD via Workload Identity
+│   ├── deploy-argocd-apps.sh  # Deploys Istio Ambient Mode across all 8 clusters via Root App & ApplicationSets
+│   ├── setup-github-webhook.sh# Configures GitHub App / Webhook subscription for automated GitOps push sync
+│   ├── access-argocd-ui.sh    # Port-forwards Argo CD Web UI & displays admin credentials
+│   └── install-crossplane.sh  # Installs latest Crossplane on GKE via Helm
 └── README.md
 ```
 
@@ -33,18 +34,18 @@ Automated scripts and declarative GitOps source-of-truth configurations followin
 ## 1. Deploy or Delete Multi-Cluster GKE & Argo CD
 
 ```bash
-# Provision both environments (all 6 clusters, default)
-./setup-multicluster.sh --all
+# Provision both environments (all 8 clusters, default)
+./scripts/setup-multicluster.sh --all
 
-# Provision only Environment 1 (Full Control Plane + 2 Managed Clusters)
-./setup-multicluster.sh --full
+# Provision only Environment 1 (Full Control Plane + 4 Managed Clusters)
+./scripts/setup-multicluster.sh --full
 
 # Provision only Environment 2 (Headless Argo CD Core Control Plane + 2 Managed Clusters)
-./setup-multicluster.sh --headless
+./scripts/setup-multicluster.sh --headless
 
 # Delete clusters for the selected environment
-./setup-multicluster.sh --delete
-./setup-multicluster.sh --delete --yes
+./scripts/setup-multicluster.sh --delete
+./scripts/setup-multicluster.sh --delete --yes
 ```
 
 ### Dual-Topology Architecture
@@ -87,7 +88,7 @@ Both managed clusters are registered into Argo CD using **GCP Workload Identity*
 Use the automated access helper to print credentials, establish a local port-forward, and provide 1-click direct login URLs:
 ```bash
 # Print credentials, 1-click direct login URL, and start port-forward
-./access-argocd-ui.sh
+./scripts/access-argocd-ui.sh
 ```
 
 When you click the **1-Click Direct Login URL**:
@@ -106,7 +107,7 @@ Manual access commands:
 ## 2. Deploy Crossplane
 
 ```bash
-./install-crossplane.sh
+./scripts/install-crossplane.sh
 ```
 - Verifies Crossplane `v2.4.3` deployment in `crossplane-system`.
 
@@ -151,7 +152,7 @@ Both Argo CD control planes expose public external LoadBalancers (`argocd-server
 
 Run the webhook setup script to link the repositories and Argo CD:
 ```bash
-./setup-github-webhook.sh
+./scripts/setup-github-webhook.sh
 ```
 - Fetches `argocd-github-webhook-secret` from GCP Secret Manager (`mq-usecase-1`).
 - Configures `webhook.github.secret` in `argocd-secret` on both control plane clusters.
@@ -160,19 +161,19 @@ Run the webhook setup script to link the repositories and Argo CD:
 
 To deploy Istio Ambient mesh across all 6 clusters (2 control planes + 4 managed clusters):
 ```bash
-# Deploy to all 6 clusters across both environments (default)
-./deploy-argocd-apps.sh --all
+# Deploy to all clusters across both environments (default)
+./scripts/deploy-argocd-apps.sh --all
 
-# Or deploy to Environment 1 only (Full Control Plane + 2 Managed Clusters)
-./deploy-argocd-apps.sh --full
+# Or deploy to Environment 1 only (Full Control Plane + 4 Managed Clusters)
+./scripts/deploy-argocd-apps.sh --full
 
 # Or deploy to Environment 2 only (Headless Control Plane + 2 Managed Clusters)
-./deploy-argocd-apps.sh --headless
+./scripts/deploy-argocd-apps.sh --headless
 ```
 
 Or pass your GitHub PAT explicitly if not detected:
 ```bash
-./deploy-argocd-apps.sh --token <GITHUB_PAT>
+./scripts/deploy-argocd-apps.sh --token <GITHUB_PAT>
 ```
 
 ### Validate Ambient Mode Traffic Across All 6 Clusters
