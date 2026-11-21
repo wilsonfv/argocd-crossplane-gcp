@@ -7,11 +7,25 @@ spec:
   generators:
     - matrix:
         generators:
-          - clusters: {}
+          - scmProvider:
+              cloneProtocol: https
+              github:
+                api: http://github-scm-proxy.argocd.svc.cluster.local
+                organization: wilsonfv
+                tokenRef:
+                  secretName: scm-github-token
+                  key: token
+              filters:
+                - repositoryMatch: "^argocd-mq-usecase-.*"
+          - git:
+              repoURL: "{{url}}"
+              revision: "{{branch}}"
+              files:
+                - path: "*/versions.yaml"
           - list:
               elements:
                 - app: opa-gatekeeper
-                  path: open-policy-agent/charts/gatekeeper
+                  path: "open-policy-agent/versions/{{versions.gatekeeper}}/charts/gatekeeper"
                   wave: "0"
                 - app: opa-policies
                   path: open-policy-agent/policies
@@ -21,7 +35,7 @@ spec:
                   wave: "2"
   template:
     metadata:
-      name: "{{app}}-{{name}}"
+      name: "{{app}}-{{path.basename}}"
       namespace: argocd
       annotations:
         argocd.argoproj.io/sync-wave: "{{wave}}"
@@ -34,7 +48,7 @@ spec:
         targetRevision: HEAD
         path: "{{path}}"
       destination:
-        name: "{{name}}"
+        name: "{{path.basename}}"
         namespace: gatekeeper-system
       syncPolicy:
         automated:
