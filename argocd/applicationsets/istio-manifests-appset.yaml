@@ -25,10 +25,10 @@ spec:
           - list:
               elements:
                 - app: istio-policies
-                  path: feature/istio/policies
+                  path: istio/policies
                   wave: "3"
                 - app: ambient-samples
-                  path: feature/istio/samples
+                  path: istio/samples
                   wave: "4"
   template:
     metadata:
@@ -41,7 +41,7 @@ spec:
     spec:
       project: default
       source:
-        repoURL: https://github.com/wilsonfv/argocd-crossplane-gcp.git
+        repoURL: https://github.com/wilsonfv/argocd-applications.git
         targetRevision: HEAD
         path: "{{path}}"
       destination:

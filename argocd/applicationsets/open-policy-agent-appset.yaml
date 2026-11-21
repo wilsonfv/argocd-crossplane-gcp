@@ -11,13 +11,13 @@ spec:
           - list:
               elements:
                 - app: opa-gatekeeper
-                  path: feature/open-policy-agent/charts/gatekeeper
+                  path: open-policy-agent/charts/gatekeeper
                   wave: "0"
                 - app: opa-policies
-                  path: feature/open-policy-agent/policies
+                  path: open-policy-agent/policies
                   wave: "1"
                 - app: opa-samples
-                  path: feature/open-policy-agent/samples
+                  path: open-policy-agent/samples
                   wave: "2"
   template:
     metadata:
@@ -30,7 +30,7 @@ spec:
     spec:
       project: default
       source:
-        repoURL: https://github.com/wilsonfv/argocd-crossplane-gcp.git
+        repoURL: https://github.com/wilsonfv/argocd-applications.git
         targetRevision: HEAD
         path: "{{path}}"
       destination:

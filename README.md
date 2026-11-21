@@ -15,24 +15,17 @@ Automated scripts and declarative GitOps source-of-truth configurations followin
 ├── access-argocd-ui.sh        # Port-forwards Argo CD Web UI & displays admin credentials
 ├── argocd/                    # Argo CD configurations, ApplicationSets and manifests
 │   ├── root-app.yaml          # Root Application
-│   ├── applicationsets/       # ApplicationSets (Matrix & Cluster generators)
+│   ├── applicationsets/       # ApplicationSets (Matrix & SCM Provider generators)
 │   └── manifests/             # Declarative Argo CD installation & RBAC patches
-├── feature/                   # Root folder for platform features
-│   ├── istio/                 # Istio Service Mesh configuration
-│   │   ├── charts/            # Helm charts (istio-base, istio-cni, istiod, istio-ztunnel, istio-waypoint)
-│   │   ├── policies/          # Ambient authorization, telemetry & network policies
-│   │   └── samples/           # Sample workloads (echo-server, sleep-client, waypoint-gateway)
-│   └── open-policy-agent/     # Open Policy Agent (Gatekeeper) configuration
-│       ├── charts/            # Helm chart for OPA Gatekeeper
-│       ├── policies/          # ConstraintTemplates and Constraints (labels, privileged containers)
-│       └── samples/           # Sample compliant workload and violation test cases
 └── README.md
 ```
 
 > **Architecture**:
-> - **Main GitOps Repo** ([`github.com/wilsonfv/argocd-crossplane-gcp`](https://github.com/wilsonfv/argocd-crossplane-gcp)): Contains all generalized Argo CD application definitions, Helm charts, and ApplicationSets.
-> - **Project `mq-usecase-1` Repo** ([`github.com/wilsonfv/argocd-mq-usecase-1`](https://github.com/wilsonfv/argocd-mq-usecase-1)): Minimal dedicated cluster configs for `argocd-control-plane` and `argocd-control-plane-headless`.
-> - **Project `mq-usecase-2` Repo** ([`github.com/wilsonfv/argocd-mq-usecase-2`](https://github.com/wilsonfv/argocd-mq-usecase-2)): Minimal dedicated cluster configs for `gke-managed-cluster`, `gke-managed-cluster-2`, `gke-managed-cluster-3`, and `gke-managed-cluster-4`.
+> - **Control Plane & Infra Orchestration** ([`github.com/wilsonfv/argocd-crossplane-gcp`](https://github.com/wilsonfv/argocd-crossplane-gcp)): Orchestrates 8 GKE clusters, Root Application, ApplicationSets, and Crossplane.
+> - **Centralized Application & Chart Repo** ([`github.com/wilsonfv/argocd-applications`](https://github.com/wilsonfv/argocd-applications)): Contains all platform applications, packaged Helm charts (Istio 1.30.7 & 1.30.8, OPA Gatekeeper), policies, and samples.
+> - **Project `mq-usecase-1` Repo** ([`github.com/wilsonfv/argocd-mq-usecase-1`](https://github.com/wilsonfv/argocd-mq-usecase-1)): Minimal dedicated cluster configs & `versions.yaml` for `argocd-control-plane` and `argocd-control-plane-headless`.
+> - **Project `mq-usecase-2` Repo** ([`github.com/wilsonfv/argocd-mq-usecase-2`](https://github.com/wilsonfv/argocd-mq-usecase-2)): Minimal dedicated cluster configs & `versions.yaml` for `gke-managed-cluster`, `gke-managed-cluster-2`, `gke-managed-cluster-3`, and `gke-managed-cluster-4`.
+> - **Project `mq-usecase-3` Repo** ([`github.com/wilsonfv/argocd-mq-usecase-3`](https://github.com/wilsonfv/argocd-mq-usecase-3)): Minimal dedicated cluster configs & `versions.yaml` for `gke-managed-cluster-5` and `gke-managed-cluster-6`.
 > - **Automated GitOps Sync**: GitHub push events on `main` trigger Argo CD's public webhook endpoints to sync configs instantly. Secrets stored in GCP Secret Manager (`mq-usecase-1`).
 
 ---
@@ -124,8 +117,9 @@ Manual access commands:
 Argo CD application manifests have been generalized in this repository using **Root App** (App-of-Apps) and **ApplicationSets**:
 - **`argocd/root-app.yaml`**: Root Application deployed to the control plane, managing the ApplicationSets.
 - **`argocd/applicationsets/open-policy-agent-appset.yaml`**: Uses a Matrix generator targeting all clusters (both control planes and managed GKE clusters) to deploy OPA Gatekeeper (`charts/gatekeeper`), policy constraints (`policies/`), and sample workloads (`samples/`).
-- **`argocd/applicationsets/istio-ambient-appset.yaml`**: Uses a Matrix generator combining SCM Provider and Git Files (`*/versions.yaml`) to dynamically pull official Istio charts (`base`, `cni`, `istiod`, `ztunnel`) from `https://blob.istio.io/istio-release/charts` at the **cluster's specific target version** (`{{versions.istio}}`). Cluster A can run `1.30.7` while Cluster B runs `1.30.8` independently!
-- **`argocd/applicationsets/istio-manifests-appset.yaml`**: Dynamically deploys Istio Ambient authorization policies and sample workloads across clusters.
+- **`argocd/applicationsets/istio-ambient-appset.yaml`**: Uses a Matrix generator combining SCM Provider and Git Files (`*/versions.yaml`) to dynamically pull Istio charts (`base`, `cni`, `istiod`, `ztunnel`) directly from [`argocd-applications`](https://github.com/wilsonfv/argocd-applications) (`path: istio/versions/{{versions.istio}}/charts/{{app}}`) without external repository dependencies! Cluster A can run `1.30.7` while Cluster B runs `1.30.8` independently!
+- **`argocd/applicationsets/istio-manifests-appset.yaml`**: Dynamically deploys Istio Ambient authorization policies and sample workloads from `argocd-applications` (`istio/policies`, `istio/samples`) across clusters.
+- **`argocd/applicationsets/open-policy-agent-appset.yaml`**: Deploys OPA Gatekeeper, constraints, and samples from `argocd-applications` (`open-policy-agent/`) across clusters.
 - **`argocd/applicationsets/cluster-configs-scm-appset.yaml`**: Uses Argo CD's **SCM Provider Generator** (`scmProvider.github`) combined with Git Directory generator in a Matrix to dynamically discover and manage all per-project repositories matching `^argocd-mq-usecase-.*` (`argocd-mq-usecase-1`, `argocd-mq-usecase-2`, `argocd-mq-usecase-3`). Any new repo or cluster folder is automatically discovered and reconciled without changing manifests!
 - **`argocd/applicationsets/github-scm-proxy.yaml`**: Lightweight in-cluster proxy facilitating seamless GitHub API user repository discovery for the SCM Provider.
 
@@ -137,7 +131,7 @@ versions:
   gatekeeper: "3.23.1"
 ```
 - **Independent Cluster Upgrades**: Upgrade a cluster by changing a single line in that cluster's `versions.yaml` (e.g., `istio: "1.30.8"` in `gke-managed-cluster-3/versions.yaml`).
-- **Zero Chart Duplication**: Charts are fetched dynamically from `https://blob.istio.io/istio-release/charts` at the exact requested version using Argo CD Multi-Source.
+- **Zero External Dependencies**: All packaged charts (both `1.30.7` and `1.30.8`) and policies are hosted in [`argocd-applications`](https://github.com/wilsonfv/argocd-applications). No external network dependencies on `blob.istio.io` during cluster reconciliation.
 
 ### Dedicated Repositories per GCP Project
 1. **[`argocd-mq-usecase-1`](https://github.com/wilsonfv/argocd-mq-usecase-1)**:

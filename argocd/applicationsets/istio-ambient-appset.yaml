@@ -25,16 +25,12 @@ spec:
           - list:
               elements:
                 - app: istio-base
-                  chart: base
                   wave: "0"
                 - app: istio-cni
-                  chart: cni
                   wave: "1"
                 - app: istiod
-                  chart: istiod
                   wave: "1"
                 - app: istio-ztunnel
-                  chart: ztunnel
                   wave: "2"
   template:
     metadata:
@@ -46,16 +42,10 @@ spec:
         - resources-finalizer.argocd.argoproj.io
     spec:
       project: default
-      sources:
-        - repoURL: https://blob.istio.io/istio-release/charts
-          chart: "{{chart}}"
-          targetRevision: "{{versions.istio}}"
-          helm:
-            valueFiles:
-              - $valuesRepo/feature/istio/values/{{chart}}-values.yaml
-        - repoURL: https://github.com/wilsonfv/argocd-crossplane-gcp.git
-          targetRevision: HEAD
-          ref: valuesRepo
+      source:
+        repoURL: https://github.com/wilsonfv/argocd-applications.git
+        targetRevision: HEAD
+        path: "istio/versions/{{versions.istio}}/charts/{{app}}"
       destination:
         name: "{{path.basename}}"
         namespace: istio-system

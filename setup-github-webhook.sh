@@ -29,6 +29,7 @@ readonly DEFAULT_ENV2_CP_CONTEXT="gke_mq-usecase-1_europe-west1_argocd-control-p
 
 # Target repositories to subscribe
 readonly REPOSITORIES=(
+  "argocd-applications"
   "argocd-mq-usecase-1"
   "argocd-mq-usecase-2"
   "argocd-mq-usecase-3"

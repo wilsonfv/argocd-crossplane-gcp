@@ -1,6 +1,0 @@
-# Istio Base CRDs and cluster-wide resources configuration
-base:
-  global:
-    istioNamespace: istio-system
-  defaultRevision: default
-  enableCRDValidation: true

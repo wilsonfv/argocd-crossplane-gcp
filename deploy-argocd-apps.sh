@@ -27,6 +27,7 @@ readonly DEFAULT_ZONE=""
 readonly DEFAULT_ARGOCD_NAMESPACE="argocd"
 readonly DEFAULT_ISTIO_NAMESPACE="istio-system"
 readonly DEFAULT_MAIN_REPO_URL="https://github.com/wilsonfv/argocd-crossplane-gcp.git"
+readonly DEFAULT_APPS_REPO_URL="https://github.com/wilsonfv/argocd-applications.git"
 readonly DEFAULT_MQ1_REPO_URL="https://github.com/wilsonfv/argocd-mq-usecase-1.git"
 readonly DEFAULT_MQ2_REPO_URL="https://github.com/wilsonfv/argocd-mq-usecase-2.git"
 readonly DEFAULT_MQ3_REPO_URL="https://github.com/wilsonfv/argocd-mq-usecase-3.git"
@@ -350,7 +351,7 @@ ensure_argocd_repo_secrets() {
     return 0
   fi
 
-  local repos=("${DEFAULT_MAIN_REPO_URL}" "${DEFAULT_MQ1_REPO_URL}" "${DEFAULT_MQ2_REPO_URL}" "${DEFAULT_MQ3_REPO_URL}")
+  local repos=("${DEFAULT_MAIN_REPO_URL}" "${DEFAULT_APPS_REPO_URL}" "${DEFAULT_MQ1_REPO_URL}" "${DEFAULT_MQ2_REPO_URL}" "${DEFAULT_MQ3_REPO_URL}")
   local repo_url
   for repo_url in "${repos[@]}"; do
     local rname
@@ -483,31 +484,47 @@ validate_opa_enforcement() {
   local name="$2"
 
   log_info "[${name}] Validating OPA Gatekeeper policy enforcement..."
-  local test_yaml="feature/open-policy-agent/samples/test-violations/bad-privileged-pod.yaml"
-  if [[ -f "${test_yaml}" ]]; then
-    kubectl --context="${ctx}" create namespace apps-opa --dry-run=client -o yaml | kubectl --context="${ctx}" apply -f - >/dev/null
+  kubectl --context="${ctx}" create namespace apps-opa --dry-run=client -o yaml | kubectl --context="${ctx}" apply -f - >/dev/null
 
-    local attempt=1 max_attempts=15 blocked=false output=""
-    while (( attempt <= max_attempts )); do
-      if output="$(kubectl --context="${ctx}" apply -f "${test_yaml}" 2>&1)"; then
-        kubectl --context="${ctx}" delete -f "${test_yaml}" --ignore-not-found &>/dev/null || true
+  local test_manifest
+  test_manifest=$(cat << 'EOF'
+apiVersion: v1
+kind: Pod
+metadata:
+  name: privileged-pod-violation
+  namespace: apps-opa
+  labels:
+    app: test-app
+spec:
+  containers:
+    - name: privileged-container
+      image: registry.k8s.io/e2e-test-images/agnhost:2.53
+      command: ["sleep", "3600"]
+      securityContext:
+        privileged: true
+EOF
+)
+
+  local attempt=1 max_attempts=15 blocked=false output=""
+  while (( attempt <= max_attempts )); do
+    if output="$(echo "${test_manifest}" | kubectl --context="${ctx}" apply -f - 2>&1)"; then
+      echo "${test_manifest}" | kubectl --context="${ctx}" delete -f - --ignore-not-found &>/dev/null || true
+      sleep 4
+      (( attempt++ ))
+    else
+      if [[ "${output}" =~ denied|forbidden|denied\ by|K8sBlockPrivileged|block-privileged-containers ]]; then
+        log_success "[${name}] OPA Gatekeeper policy enforcement validated (privileged pod blocked)."
+        blocked=true
+        break
+      else
         sleep 4
         (( attempt++ ))
-      else
-        if [[ "${output}" =~ denied|forbidden|denied\ by|K8sBlockPrivileged|block-privileged-containers ]]; then
-          log_success "[${name}] OPA Gatekeeper policy enforcement validated (privileged pod blocked)."
-          blocked=true
-          break
-        else
-          sleep 4
-          (( attempt++ ))
-        fi
       fi
-    done
-
-    if [[ "${blocked}" != "true" ]]; then
-      log_warn "[${name}] Privileged pod was not blocked after ${max_attempts} attempts: ${output:-no response}"
     fi
+  done
+
+  if [[ "${blocked}" != "true" ]]; then
+    log_warn "[${name}] Privileged pod was not blocked after ${max_attempts} attempts: ${output:-no response}"
   fi
 }
 
