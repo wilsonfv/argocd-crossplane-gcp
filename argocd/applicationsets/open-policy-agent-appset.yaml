@@ -27,13 +27,13 @@ spec:
           - list:
               elements:
                 - app: opa-gatekeeper
-                  path: "open-policy-agent/versions/{{versions.gatekeeper}}/charts/gatekeeper"
+                  appPath: "open-policy-agent/versions/{{versions.gatekeeper}}/charts/gatekeeper"
                   wave: "0"
                 - app: opa-policies
-                  path: open-policy-agent/policies
+                  appPath: open-policy-agent/policies
                   wave: "1"
                 - app: opa-samples
-                  path: open-policy-agent/samples
+                  appPath: open-policy-agent/samples
                   wave: "2"
   template:
     metadata:
@@ -48,7 +48,7 @@ spec:
       source:
         repoURL: https://github.com/wilsonfv/argocd-applications.git
         targetRevision: HEAD
-        path: "{{path}}"
+        path: "{{appPath}}"
       destination:
         name: "{{path.basename}}"
         namespace: gatekeeper-system

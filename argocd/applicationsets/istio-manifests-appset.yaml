@@ -27,10 +27,10 @@ spec:
           - list:
               elements:
                 - app: istio-policies
-                  path: istio/policies
+                  appPath: istio/policies
                   wave: "3"
                 - app: ambient-samples
-                  path: istio/samples
+                  appPath: istio/samples
                   wave: "4"
   template:
     metadata:
@@ -45,7 +45,7 @@ spec:
       source:
         repoURL: https://github.com/wilsonfv/argocd-applications.git
         targetRevision: HEAD
-        path: "{{path}}"
+        path: "{{appPath}}"
       destination:
         name: "{{path.basename}}"
         namespace: istio-system
