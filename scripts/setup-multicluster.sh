@@ -346,6 +346,42 @@ wait_for_cluster_running() {
 }
 
 #######################################
+# Acquire file lock for kubeconfig operations safely without deadlocks.
+#######################################
+acquire_kubeconfig_lock() {
+  local lockdir="/tmp/kubeconfig_get_credentials.lock"
+  local max_wait=15
+  local start_time
+  start_time="$(date +%s)"
+
+  while ! mkdir "${lockdir}" 2>/dev/null; do
+    local now
+    now="$(date +%s)"
+    local lock_pid
+    lock_pid="$(cat "${lockdir}/pid" 2>/dev/null || true)"
+    if [[ -n "${lock_pid}" ]] && ! kill -0 "${lock_pid}" 2>/dev/null; then
+      rm -rf "${lockdir}" 2>/dev/null || true
+      continue
+    fi
+    if (( now - start_time > max_wait )); then
+      rm -rf "${lockdir}" 2>/dev/null || true
+      continue
+    fi
+    sleep 0.5
+  done
+
+  echo "$$" > "${lockdir}/pid" 2>/dev/null || true
+}
+
+#######################################
+# Release file lock for kubeconfig operations.
+#######################################
+release_kubeconfig_lock() {
+  local lockdir="/tmp/kubeconfig_get_credentials.lock"
+  rm -rf "${lockdir}" 2>/dev/null || true
+}
+
+#######################################
 # Obtain kubeconfig credentials for a cluster.
 #######################################
 fetch_cluster_credentials() {
@@ -355,14 +391,10 @@ fetch_cluster_credentials() {
   local loc_flag
   loc_flag="$(format_location_flag "${location}")"
 
-  local lockdir="/tmp/kubeconfig_get_credentials.lock"
-  while ! mkdir "${lockdir}" 2>/dev/null; do
-    sleep 0.5
-  done
-
+  acquire_kubeconfig_lock
   log_info "Fetching kubeconfig credentials for '${cluster_name}' in ${location} (project '${project_id}')..."
   gcloud container clusters get-credentials "${cluster_name}" "${loc_flag}" --project "${project_id}" || true
-  rm -rf "${lockdir}"
+  release_kubeconfig_lock
 }
 
 #######################################
@@ -602,7 +634,7 @@ subjects:
 "
   done
 
-  echo "${full_manifest}" | kubectl --context="${managed_context}" apply -f - >/dev/null
+  echo "${full_manifest}" | kubectl --context="${managed_context}" apply --server-side --force-conflicts -f - >/dev/null
 }
 
 #######################################

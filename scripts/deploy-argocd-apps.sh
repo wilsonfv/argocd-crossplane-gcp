@@ -235,6 +235,42 @@ check_prerequisites() {
 }
 
 #######################################
+# Acquire file lock for kubeconfig operations safely without deadlocks.
+#######################################
+acquire_kubeconfig_lock() {
+  local lockdir="/tmp/kubeconfig_get_credentials.lock"
+  local max_wait=15
+  local start_time
+  start_time="$(date +%s)"
+
+  while ! mkdir "${lockdir}" 2>/dev/null; do
+    local now
+    now="$(date +%s)"
+    local lock_pid
+    lock_pid="$(cat "${lockdir}/pid" 2>/dev/null || true)"
+    if [[ -n "${lock_pid}" ]] && ! kill -0 "${lock_pid}" 2>/dev/null; then
+      rm -rf "${lockdir}" 2>/dev/null || true
+      continue
+    fi
+    if (( now - start_time > max_wait )); then
+      rm -rf "${lockdir}" 2>/dev/null || true
+      continue
+    fi
+    sleep 0.5
+  done
+
+  echo "$$" > "${lockdir}/pid" 2>/dev/null || true
+}
+
+#######################################
+# Release file lock for kubeconfig operations.
+#######################################
+release_kubeconfig_lock() {
+  local lockdir="/tmp/kubeconfig_get_credentials.lock"
+  rm -rf "${lockdir}" 2>/dev/null || true
+}
+
+#######################################
 # Connect to a target GKE cluster and generate kubeconfig.
 # Arguments:
 #   Cluster name
@@ -248,19 +284,15 @@ connect_cluster() {
   local loc_flag
   loc_flag="$(format_location_flag "${location}")"
 
-  local lockdir="/tmp/kubeconfig_get_credentials.lock"
-  while ! mkdir "${lockdir}" 2>/dev/null; do
-    sleep 0.5
-  done
-
+  acquire_kubeconfig_lock
   log_info "Connecting to cluster '${cluster_name}' in ${location} (${project_id})..."
   if ! gcloud container clusters describe "${cluster_name}" "${loc_flag}" --project "${project_id}" &>/dev/null; then
-    rm -rf "${lockdir}"
+    release_kubeconfig_lock
     log_error "Cluster '${cluster_name}' not found in project ${project_id} (${location})."
     return 1
   fi
   gcloud container clusters get-credentials "${cluster_name}" "${loc_flag}" --project "${project_id}" || true
-  rm -rf "${lockdir}"
+  release_kubeconfig_lock
   log_success "Connected to '${cluster_name}'."
 }
 

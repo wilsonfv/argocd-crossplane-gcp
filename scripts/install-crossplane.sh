@@ -228,6 +228,42 @@ check_prerequisites() {
 }
 
 #######################################
+# Acquire file lock for kubeconfig operations safely without deadlocks.
+#######################################
+acquire_kubeconfig_lock() {
+  local lockdir="/tmp/kubeconfig_get_credentials.lock"
+  local max_wait=15
+  local start_time
+  start_time="$(date +%s)"
+
+  while ! mkdir "${lockdir}" 2>/dev/null; do
+    local now
+    now="$(date +%s)"
+    local lock_pid
+    lock_pid="$(cat "${lockdir}/pid" 2>/dev/null || true)"
+    if [[ -n "${lock_pid}" ]] && ! kill -0 "${lock_pid}" 2>/dev/null; then
+      rm -rf "${lockdir}" 2>/dev/null || true
+      continue
+    fi
+    if (( now - start_time > max_wait )); then
+      rm -rf "${lockdir}" 2>/dev/null || true
+      continue
+    fi
+    sleep 0.5
+  done
+
+  echo "$$" > "${lockdir}/pid" 2>/dev/null || true
+}
+
+#######################################
+# Release file lock for kubeconfig operations.
+#######################################
+release_kubeconfig_lock() {
+  local lockdir="/tmp/kubeconfig_get_credentials.lock"
+  rm -rf "${lockdir}" 2>/dev/null || true
+}
+
+#######################################
 # Connect to target GKE cluster.
 # Globals:
 #   PROJECT_ID, CLUSTER_NAME, REGION, ZONE
@@ -248,20 +284,17 @@ connect_cluster() {
     location_desc="region: ${REGION}"
   fi
 
+  acquire_kubeconfig_lock
   log_info "Connecting to GKE cluster '${CLUSTER_NAME}' in ${location_desc}..."
 
   if ! gcloud container clusters describe "${CLUSTER_NAME}" "${location_flags[@]}" --project "${PROJECT_ID}" &>/dev/null; then
+    release_kubeconfig_lock
     log_error "Cluster '${CLUSTER_NAME}' not found in project ${PROJECT_ID} (${location_desc})."
     return 1
   fi
 
-  local lockdir="/tmp/kubeconfig_get_credentials.lock"
-  while ! mkdir "${lockdir}" 2>/dev/null; do
-    sleep 0.5
-  done
-
   gcloud container clusters get-credentials "${CLUSTER_NAME}" "${location_flags[@]}" --project "${PROJECT_ID}" || true
-  rm -rf "${lockdir}"
+  release_kubeconfig_lock
   log_success "Connected to cluster '${CLUSTER_NAME}'."
 }
 
