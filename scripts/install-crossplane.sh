@@ -255,7 +255,13 @@ connect_cluster() {
     return 1
   fi
 
-  gcloud container clusters get-credentials "${CLUSTER_NAME}" "${location_flags[@]}" --project "${PROJECT_ID}"
+  local lockdir="/tmp/kubeconfig_get_credentials.lock"
+  while ! mkdir "${lockdir}" 2>/dev/null; do
+    sleep 0.5
+  done
+
+  gcloud container clusters get-credentials "${CLUSTER_NAME}" "${location_flags[@]}" --project "${PROJECT_ID}" || true
+  rm -rf "${lockdir}"
   log_success "Connected to cluster '${CLUSTER_NAME}'."
 }
 

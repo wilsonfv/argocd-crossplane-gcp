@@ -22,8 +22,6 @@ set -o pipefail
 # -----------------------------------------------------------------------------
 # Global Constants and Defaults
 # -----------------------------------------------------------------------------
-readonly DEFAULT_REGION="europe-west1"
-readonly DEFAULT_ZONE=""
 readonly DEFAULT_POD_RANGE="gke-pod"
 readonly DEFAULT_SERVICE_RANGE="gke-service"
 readonly DEFAULT_MACHINE_TYPE="e2-standard-4"
@@ -93,7 +91,6 @@ readonly COLOR_BOLD='\033[1m'
 readonly COLOR_NC='\033[0m'
 
 # Mutable runtime variables
-PROJECT_ID="${PROJECT_ID:-}"
 SETUP_TARGET="${SETUP_TARGET:-all}" # all, full, headless
 DELETE_CLUSTERS="${DELETE_CLUSTERS:-false}"
 AUTO_APPROVE="${AUTO_APPROVE:-false}"
@@ -157,13 +154,6 @@ retry_cmd() {
     sleep "$(( delay + RANDOM % 3 ))"
     (( attempt++ ))
   done
-}
-
-#######################################
-# Retrieve active GCP project ID.
-#######################################
-get_gcloud_config_project() {
-  gcloud config list --format='value(core.project)' 2>/dev/null || true
 }
 
 #######################################
@@ -264,7 +254,7 @@ check_prerequisites() {
 
   # Verify and enable GKE APIs if needed
   local project
-  for project in "${DEFAULT_ENV1_CP_PROJECT_ID}" "${DEFAULT_ENV1_MANAGED_PROJECT_ID}"; do
+  for project in "${DEFAULT_ENV1_CP_PROJECT_ID}" "${DEFAULT_ENV1_MANAGED_PROJECT_ID}" "${DEFAULT_ENV1_MANAGED3_PROJECT_ID}"; do
     if ! gcloud services list --project="${project}" --enabled --filter="name:container.googleapis.com" --format="value(name)" 2>/dev/null | grep -q "container.googleapis.com"; then
       log_info "Enabling Kubernetes Engine API on '${project}'..."
       gcloud services enable container.googleapis.com --project="${project}"

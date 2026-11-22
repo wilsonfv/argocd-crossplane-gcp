@@ -25,8 +25,6 @@ readonly REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 # -----------------------------------------------------------------------------
 # Global Constants and Defaults
 # -----------------------------------------------------------------------------
-readonly DEFAULT_REGION="europe-west1"
-readonly DEFAULT_ZONE=""
 readonly DEFAULT_ARGOCD_NAMESPACE="argocd"
 readonly DEFAULT_ISTIO_NAMESPACE="istio-system"
 readonly DEFAULT_MAIN_REPO_URL="https://github.com/wilsonfv/argocd-crossplane-gcp.git"
@@ -73,7 +71,6 @@ readonly COLOR_BOLD='\033[1m'
 readonly COLOR_NC='\033[0m'
 
 # Mutable runtime variables
-PROJECT_ID="${PROJECT_ID:-}"
 DEPLOY_TARGET="${DEPLOY_TARGET:-all}" # all, full, headless
 
 # Environment 1
@@ -106,7 +103,6 @@ ENV2_MANAGED2_LOCATION="${ENV2_MANAGED2_LOCATION:-${DEFAULT_ENV2_MANAGED2_LOCATI
 
 ARGOCD_NAMESPACE="${ARGOCD_NAMESPACE:-${DEFAULT_ARGOCD_NAMESPACE}}"
 ISTIO_NAMESPACE="${ISTIO_NAMESPACE:-${DEFAULT_ISTIO_NAMESPACE}}"
-MAIN_REPO_URL="${MAIN_REPO_URL:-${DEFAULT_MAIN_REPO_URL}}"
 GITHUB_TOKEN="${GITHUB_TOKEN:-}"
 
 #######################################
@@ -145,13 +141,6 @@ log_error() {
 }
 
 #######################################
-# Retrieve active GCP project ID from gcloud config list.
-#######################################
-get_gcloud_config_project() {
-  gcloud config list --format='value(core.project)' 2>/dev/null || true
-}
-
-#######################################
 # Format location string to corresponding gcloud flag.
 #######################################
 format_location_flag() {
@@ -170,21 +159,23 @@ usage() {
   cat <<EOF
 Usage: $(basename "$0") [OPTIONS]
 
-Deploys Istio Ambient Mode across 6 GKE clusters (2 control planes + 4 managed clusters):
+Deploys Istio Ambient Mode across all 8 GKE clusters (2 control planes + 6 managed clusters):
 
-Environment 1 (Full Control Plane + 2 Managed Clusters in VPC1):
+Environment 1 (Full Control Plane + 4 Managed Clusters in VPC1):
   - Control Plane: '${ENV1_CP_CLUSTER_NAME}' in '${ENV1_CP_LOCATION}' (${ENV1_CP_PROJECT_ID})
   - Managed 1:     '${ENV1_MANAGED1_CLUSTER_NAME}' in '${ENV1_MANAGED1_LOCATION}' (${ENV1_MANAGED_PROJECT_ID})
   - Managed 2:     '${ENV1_MANAGED2_CLUSTER_NAME}' in '${ENV1_MANAGED2_LOCATION}' (${ENV1_MANAGED_PROJECT_ID})
+  - Managed 5:     '${ENV1_MANAGED5_CLUSTER_NAME}' in '${ENV1_MANAGED5_LOCATION}' (${ENV1_MANAGED3_PROJECT_ID})
+  - Managed 6:     '${ENV1_MANAGED6_CLUSTER_NAME}' in '${ENV1_MANAGED6_LOCATION}' (${ENV1_MANAGED3_PROJECT_ID})
 
 Environment 2 (Headless Control Plane + 2 Managed Clusters in VPC2):
-  - Headless CP:   'ENV2_CP_CLUSTER_NAME' in '${ENV2_CP_LOCATION}' (${ENV2_CP_PROJECT_ID})
+  - Headless CP:   '${ENV2_CP_CLUSTER_NAME}' in '${ENV2_CP_LOCATION}' (${ENV2_CP_PROJECT_ID})
   - Managed 3:     '${ENV2_MANAGED1_CLUSTER_NAME}' in '${ENV2_MANAGED1_LOCATION}' (${ENV2_MANAGED_PROJECT_ID})
   - Managed 4:     '${ENV2_MANAGED2_CLUSTER_NAME}' in '${ENV2_MANAGED2_LOCATION}' (${ENV2_MANAGED_PROJECT_ID})
 
 Options:
-  --all                       Deploy to all 6 clusters across both environments (default)
-  --full                      Deploy only to Environment 1 (Full Control Plane + 2 Managed Clusters)
+  --all                       Deploy to all 8 clusters across both environments (default)
+  --full                      Deploy only to Environment 1 (Full Control Plane + 4 Managed Clusters)
   --headless, --core          Deploy only to Environment 2 (Headless Control Plane + 2 Managed Clusters)
   -t, --token TOKEN           GitHub PAT Token for private repository access
   -h, --help                  Show this help message
@@ -303,6 +294,18 @@ ensure_dns_zones() {
       --networks="${m_vpc1},${m_vpc2}" \
       --forwarding-targets="8.8.8.8" \
       --project="${ENV1_MANAGED_PROJECT_ID}"
+  fi
+
+  local m3_vpc1="mq-usecase-3-internal-vpc1"
+  if ! gcloud dns managed-zones describe istio-io --project="${ENV1_MANAGED3_PROJECT_ID}" &>/dev/null; then
+    log_info "Creating Cloud DNS forwarding zone 'istio-io' in project '${ENV1_MANAGED3_PROJECT_ID}'..."
+    gcloud dns managed-zones create istio-io \
+      --dns-name="istio.io." \
+      --description="Forward istio.io to 8.8.8.8" \
+      --visibility=private \
+      --networks="${m3_vpc1}" \
+      --forwarding-targets="8.8.8.8" \
+      --project="${ENV1_MANAGED3_PROJECT_ID}"
   fi
 }
 
