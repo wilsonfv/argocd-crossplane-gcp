@@ -594,6 +594,25 @@ EOF
 }
 
 #######################################
+# Connect to all target GKE clusters sequentially before parallel deployments.
+#######################################
+connect_all_clusters() {
+  log_info "Connecting to target GKE clusters..."
+  if [[ "${DEPLOY_TARGET}" == "all" || "${DEPLOY_TARGET}" == "full" ]]; then
+    connect_cluster "${ENV1_CP_CLUSTER_NAME}" "${ENV1_CP_LOCATION}" "${ENV1_CP_PROJECT_ID}"
+    connect_cluster "${ENV1_MANAGED1_CLUSTER_NAME}" "${ENV1_MANAGED1_LOCATION}" "${ENV1_MANAGED_PROJECT_ID}"
+    connect_cluster "${ENV1_MANAGED2_CLUSTER_NAME}" "${ENV1_MANAGED2_LOCATION}" "${ENV1_MANAGED_PROJECT_ID}"
+    connect_cluster "${ENV1_MANAGED5_CLUSTER_NAME}" "${ENV1_MANAGED5_LOCATION}" "${ENV1_MANAGED3_PROJECT_ID}"
+    connect_cluster "${ENV1_MANAGED6_CLUSTER_NAME}" "${ENV1_MANAGED6_LOCATION}" "${ENV1_MANAGED3_PROJECT_ID}"
+  fi
+  if [[ "${DEPLOY_TARGET}" == "all" || "${DEPLOY_TARGET}" == "headless" ]]; then
+    connect_cluster "${ENV2_CP_CLUSTER_NAME}" "${ENV2_CP_LOCATION}" "${ENV2_CP_PROJECT_ID}"
+    connect_cluster "${ENV2_MANAGED1_CLUSTER_NAME}" "${ENV2_MANAGED1_LOCATION}" "${ENV2_MANAGED_PROJECT_ID}"
+    connect_cluster "${ENV2_MANAGED2_CLUSTER_NAME}" "${ENV2_MANAGED2_LOCATION}" "${ENV2_MANAGED_PROJECT_ID}"
+  fi
+}
+
+#######################################
 # Deploy to Environment 1 (Full Control Plane + 4 Managed Clusters)
 #######################################
 deploy_environment_1() {
@@ -607,12 +626,6 @@ deploy_environment_1() {
   echo -e "${COLOR_GREEN}=====================================================================${COLOR_NC}"
   echo -e "${COLOR_GREEN}  Deploying Istio Ambient Mode: Environment 1 (VPC1)                 ${COLOR_NC}"
   echo -e "${COLOR_GREEN}=====================================================================${COLOR_NC}"
-
-  connect_cluster "${ENV1_CP_CLUSTER_NAME}" "${ENV1_CP_LOCATION}" "${ENV1_CP_PROJECT_ID}"
-  connect_cluster "${ENV1_MANAGED1_CLUSTER_NAME}" "${ENV1_MANAGED1_LOCATION}" "${ENV1_MANAGED_PROJECT_ID}"
-  connect_cluster "${ENV1_MANAGED2_CLUSTER_NAME}" "${ENV1_MANAGED2_LOCATION}" "${ENV1_MANAGED_PROJECT_ID}"
-  connect_cluster "${ENV1_MANAGED5_CLUSTER_NAME}" "${ENV1_MANAGED5_LOCATION}" "${ENV1_MANAGED3_PROJECT_ID}"
-  connect_cluster "${ENV1_MANAGED6_CLUSTER_NAME}" "${ENV1_MANAGED6_LOCATION}" "${ENV1_MANAGED3_PROJECT_ID}"
 
   ensure_gateway_api_crds "${cp_ctx}" "${ENV1_CP_CLUSTER_NAME}"
   ensure_gateway_api_crds "${m1_ctx}" "${ENV1_MANAGED1_CLUSTER_NAME}"
@@ -667,10 +680,6 @@ deploy_environment_2() {
   echo -e "${COLOR_CYAN}=====================================================================${COLOR_NC}"
   echo -e "${COLOR_CYAN}  Deploying Istio Ambient Mode: Environment 2 (VPC2)                 ${COLOR_NC}"
   echo -e "${COLOR_CYAN}=====================================================================${COLOR_NC}"
-
-  connect_cluster "${ENV2_CP_CLUSTER_NAME}" "${ENV2_CP_LOCATION}" "${ENV2_CP_PROJECT_ID}"
-  connect_cluster "${ENV2_MANAGED1_CLUSTER_NAME}" "${ENV2_MANAGED1_LOCATION}" "${ENV2_MANAGED_PROJECT_ID}"
-  connect_cluster "${ENV2_MANAGED2_CLUSTER_NAME}" "${ENV2_MANAGED2_LOCATION}" "${ENV2_MANAGED_PROJECT_ID}"
 
   ensure_gateway_api_crds "${cp_ctx}" "${ENV2_CP_CLUSTER_NAME}"
   ensure_gateway_api_crds "${m1_ctx}" "${ENV2_MANAGED1_CLUSTER_NAME}"
@@ -751,6 +760,7 @@ main() {
   parse_flags "$@"
   check_prerequisites
   ensure_dns_zones
+  connect_all_clusters
 
   if [[ "${DEPLOY_TARGET}" == "all" ]]; then
     log_info "Initiating parallel deployment for Environment 1 and Environment 2 at the same time..."
