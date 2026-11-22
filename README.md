@@ -10,8 +10,7 @@ Automated scripts and declarative GitOps source-of-truth configurations followin
 .
 ├── argocd/                    # Argo CD configurations & ApplicationSets
 │   ├── root-app.yaml          # Root Application (App-of-Apps)
-│   ├── applicationsets/       # ApplicationSets (Matrix & SCM Provider generators)
-│   └── repo-secret.template.yaml # Repository credentials secret template
+│   └── applicationsets/       # ApplicationSets (Matrix & SCM Provider generators)
 ├── scripts/                   # Platform orchestration & deployment automation scripts
 │   ├── setup-multicluster.sh  # Provisions 8-cluster GKE & configures Argo CD via Workload Identity
 │   ├── deploy-argocd-apps.sh  # Deploys Istio Ambient Mode across all 8 clusters via Root App & ApplicationSets
