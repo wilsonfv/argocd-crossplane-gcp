@@ -409,7 +409,7 @@ install_argocd_full_control_plane() {
   if kubectl --context="${cp_context}" get deployment/argocd-server -n "${ARGOCD_NAMESPACE}" &>/dev/null; then
     log_info "Argo CD server already exists in '${ARGOCD_NAMESPACE}' on '${cp_context}'. Checking health..."
   else
-    kubectl --context="${cp_context}" create namespace "${ARGOCD_NAMESPACE}" --dry-run=client -o yaml | kubectl --context="${cp_context}" apply -f -
+    kubectl --context="${cp_context}" create namespace "${ARGOCD_NAMESPACE}" --dry-run=client -o yaml | kubectl --context="${cp_context}" apply --server-side --force-conflicts -f -
     local manifest_url="https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml"
     kubectl --context="${cp_context}" apply --server-side --force-conflicts -n "${ARGOCD_NAMESPACE}" -f "${manifest_url}"
   fi
@@ -490,7 +490,7 @@ install_argocd_core_control_plane() {
   if kubectl --context="${cp_context}" get statefulset/argocd-application-controller -n "${ARGOCD_NAMESPACE}" &>/dev/null; then
     log_info "Argo CD Core already deployed in '${ARGOCD_NAMESPACE}' on '${cp_context}'. Checking health..."
   else
-    kubectl --context="${cp_context}" create namespace "${ARGOCD_NAMESPACE}" --dry-run=client -o yaml | kubectl --context="${cp_context}" apply -f -
+    kubectl --context="${cp_context}" create namespace "${ARGOCD_NAMESPACE}" --dry-run=client -o yaml | kubectl --context="${cp_context}" apply --server-side --force-conflicts -f -
     local core_url="https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/core-install.yaml"
     kubectl --context="${cp_context}" apply --server-side --force-conflicts -n "${ARGOCD_NAMESPACE}" -f "${core_url}"
   fi
@@ -661,6 +661,11 @@ register_managed_cluster() {
 
   kubectl --context="${cp_context}" -n "${ARGOCD_NAMESPACE}" delete secret "cluster-${cluster_name}" 2>/dev/null || true
 
+  local istio_version="1.30.7"
+  if [[ "${cluster_name}" == "gke-managed-cluster-3" ]]; then
+    istio_version="1.30.8"
+  fi
+
   cat <<EOF | kubectl --context="${cp_context}" apply -f -
 apiVersion: v1
 kind: Secret
@@ -671,6 +676,8 @@ metadata:
     argocd.argoproj.io/secret-type: cluster
     gcp-project: ${project_id}
     cluster-name: ${cluster_name}
+    istio-version: ${istio_version}
+    gatekeeper-version: 3.23.1
 type: Opaque
 stringData:
   name: ${cluster_name}
@@ -699,21 +706,9 @@ register_in_cluster_metadata() {
   local cluster_name="$2"
   local project_id="$3"
 
+  kubectl --context="${cp_context}" -n "${ARGOCD_NAMESPACE}" delete secret cluster-in-cluster 2>/dev/null || true
+
   cat <<EOF | kubectl --context="${cp_context}" apply -f - >/dev/null
-apiVersion: v1
-kind: Secret
-metadata:
-  name: cluster-in-cluster
-  namespace: ${ARGOCD_NAMESPACE}
-  labels:
-    argocd.argoproj.io/secret-type: cluster
-    gcp-project: ${project_id}
-    cluster-name: ${cluster_name}
-type: Opaque
-stringData:
-  name: in-cluster
-  server: https://kubernetes.default.svc
----
 apiVersion: v1
 kind: Secret
 metadata:
@@ -723,6 +718,8 @@ metadata:
     argocd.argoproj.io/secret-type: cluster
     gcp-project: ${project_id}
     cluster-name: ${cluster_name}
+    istio-version: "1.30.7"
+    gatekeeper-version: "3.23.1"
 type: Opaque
 stringData:
   name: ${cluster_name}

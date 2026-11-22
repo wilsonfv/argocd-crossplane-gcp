@@ -7,29 +7,10 @@ spec:
   generators:
     - matrix:
         generators:
-          - matrix:
-              generators:
-                - scmProvider:
-                    cloneProtocol: https
-                    github:
-                      api: http://github-scm-proxy.argocd.svc.cluster.local
-                      organization: wilsonfv
-                      tokenRef:
-                        secretName: scm-github-token
-                        key: token
-                    filters:
-                      - repositoryMatch: "^argocd-mq-usecase-.*"
-                - git:
-                    repoURL: "{{url}}"
-                    revision: "{{branch}}"
-                    files:
-                      - path: "*/versions.yaml"
-                      - path: "gke-managed-cluster-3/versions.yaml"
-                        exclude: true
-                      - path: "gke-managed-cluster-4/versions.yaml"
-                        exclude: true
-                      - path: "argocd-control-plane-headless/versions.yaml"
-                        exclude: true
+          - clusters:
+              selector:
+                matchLabels:
+                  argocd.argoproj.io/secret-type: cluster
           - list:
               elements:
                 - app: istio-base
@@ -42,7 +23,7 @@ spec:
                   wave: "2"
   template:
     metadata:
-      name: "{{app}}-{{path.basename}}"
+      name: "{{app}}-{{name}}"
       namespace: argocd
       annotations:
         argocd.argoproj.io/sync-wave: "{{wave}}"
@@ -53,9 +34,9 @@ spec:
       source:
         repoURL: https://github.com/wilsonfv/argocd-applications.git
         targetRevision: HEAD
-        path: "istio/versions/{{versions.istio}}/charts/{{app}}"
+        path: "istio/versions/{{metadata.labels.istio-version}}/charts/{{app}}"
       destination:
-        name: "{{path.basename}}"
+        name: "{{name}}"
         namespace: istio-system
       syncPolicy:
         automated:

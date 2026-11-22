@@ -5,43 +5,24 @@ metadata:
   namespace: argocd
 spec:
   generators:
-    - matrix:
-        generators:
-          - scmProvider:
-              cloneProtocol: https
-              github:
-                api: http://github-scm-proxy.argocd.svc.cluster.local
-                organization: wilsonfv
-                tokenRef:
-                  secretName: scm-github-token
-                  key: token
-              filters:
-                - repositoryMatch: "^argocd-mq-usecase-.*"
-          - git:
-              repoURL: "{{url}}"
-              revision: "{{branch}}"
-              directories:
-                - path: "*"
-                - path: "gke-managed-cluster-3"
-                  exclude: true
-                - path: "gke-managed-cluster-4"
-                  exclude: true
-                - path: "argocd-control-plane-headless"
-                  exclude: true
+    - clusters:
+        selector:
+          matchLabels:
+            argocd.argoproj.io/secret-type: cluster
   template:
     metadata:
-      name: "cluster-config-{{path.basename}}"
+      name: "cluster-config-{{name}}"
       namespace: argocd
       finalizers:
         - resources-finalizer.argocd.argoproj.io
     spec:
       project: default
       source:
-        repoURL: "{{url}}"
-        targetRevision: "{{branch}}"
-        path: "{{path}}"
+        repoURL: "https://github.com/wilsonfv/argocd-{{metadata.labels.gcp-project}}.git"
+        targetRevision: HEAD
+        path: "{{name}}"
       destination:
-        name: "{{path.basename}}"
+        name: "{{name}}"
         namespace: istio-system
       syncPolicy:
         automated:

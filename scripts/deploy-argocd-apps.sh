@@ -413,12 +413,39 @@ ensure_argocd_repo_secrets() {
 }
 
 #######################################
+# Ensure cluster secrets are properly labeled and remove duplicate in-cluster secrets.
+#######################################
+ensure_cluster_labels() {
+  local cp_context="$1"
+  log_info "Ensuring cluster labels and removing ghost cluster-in-cluster on ${cp_context}..."
+  kubectl --context="${cp_context}" -n "${ARGOCD_NAMESPACE}" delete secret cluster-in-cluster 2>/dev/null || true
+
+  local secrets
+  secrets=$(kubectl --context="${cp_context}" -n "${ARGOCD_NAMESPACE}" get secrets -l argocd.argoproj.io/secret-type=cluster -o jsonpath='{.items[*].metadata.name}' 2>/dev/null || true)
+  local s
+  for s in ${secrets}; do
+    local cname
+    cname=$(kubectl --context="${cp_context}" -n "${ARGOCD_NAMESPACE}" get secret "${s}" -o jsonpath='{.metadata.labels.cluster-name}' 2>/dev/null || true)
+    local istio_ver="1.30.7"
+    if [[ "${cname}" == "gke-managed-cluster-3" || "${s}" =~ gke-managed-cluster-3 ]]; then
+      istio_ver="1.30.8"
+    fi
+    kubectl --context="${cp_context}" -n "${ARGOCD_NAMESPACE}" label secret "${s}" \
+      istio-version="${istio_ver}" \
+      gatekeeper-version="3.23.1" \
+      --overwrite >/dev/null 2>&1 || true
+  done
+}
+
+#######################################
 # Deploy generalized Root Application & ApplicationSets on a control plane.
 # Arguments:
 #   Control plane context
 #######################################
 deploy_root_app() {
   local cp_context="$1"
+
+  ensure_cluster_labels "${cp_context}"
 
   log_info "[${cp_context}] Applying Root Application and ApplicationSets..."
   kubectl --context="${cp_context}" apply -n "${ARGOCD_NAMESPACE}" -k "${REPO_ROOT}/argocd/applicationsets" >/dev/null
@@ -522,7 +549,7 @@ validate_opa_enforcement() {
   local name="$2"
 
   log_info "[${name}] Validating OPA Gatekeeper policy enforcement..."
-  kubectl --context="${ctx}" create namespace apps-opa --dry-run=client -o yaml | kubectl --context="${ctx}" apply -f - >/dev/null
+  kubectl --context="${ctx}" create namespace apps-opa --dry-run=client -o yaml | kubectl --context="${ctx}" apply --server-side --force-conflicts -f - >/dev/null
 
   local test_manifest
   test_manifest=$(cat << 'EOF'
@@ -688,7 +715,7 @@ print_summary() {
 
   echo ""
   echo -e "${COLOR_GREEN}=====================================================================${COLOR_NC}"
-  echo -e "${COLOR_GREEN}      6-Cluster Istio Ambient Mode Deployment Summary (All Up)       ${COLOR_NC}"
+  echo -e "${COLOR_GREEN}      8-Cluster Istio Ambient Mode Deployment Summary (All Up)       ${COLOR_NC}"
   echo -e "${COLOR_GREEN}=====================================================================${COLOR_NC}"
 
   if [[ "${DEPLOY_TARGET}" == "all" || "${DEPLOY_TARGET}" == "full" ]]; then

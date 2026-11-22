@@ -7,33 +7,14 @@ spec:
   generators:
     - matrix:
         generators:
-          - matrix:
-              generators:
-                - scmProvider:
-                    cloneProtocol: https
-                    github:
-                      api: http://github-scm-proxy.argocd.svc.cluster.local
-                      organization: wilsonfv
-                      tokenRef:
-                        secretName: scm-github-token
-                        key: token
-                    filters:
-                      - repositoryMatch: "^argocd-mq-usecase-.*"
-                - git:
-                    repoURL: "{{url}}"
-                    revision: "{{branch}}"
-                    files:
-                      - path: "*/versions.yaml"
-                      - path: "gke-managed-cluster-3/versions.yaml"
-                        exclude: true
-                      - path: "gke-managed-cluster-4/versions.yaml"
-                        exclude: true
-                      - path: "argocd-control-plane-headless/versions.yaml"
-                        exclude: true
+          - clusters:
+              selector:
+                matchLabels:
+                  argocd.argoproj.io/secret-type: cluster
           - list:
               elements:
                 - app: opa-gatekeeper
-                  appPath: "open-policy-agent/versions/{{versions.gatekeeper}}/charts/gatekeeper"
+                  appPath: "open-policy-agent/versions/{{metadata.labels.gatekeeper-version}}/charts/gatekeeper"
                   wave: "0"
                 - app: opa-policies
                   appPath: open-policy-agent/policies
@@ -43,7 +24,7 @@ spec:
                   wave: "2"
   template:
     metadata:
-      name: "{{app}}-{{path.basename}}"
+      name: "{{app}}-{{name}}"
       namespace: argocd
       annotations:
         argocd.argoproj.io/sync-wave: "{{wave}}"
@@ -56,7 +37,7 @@ spec:
         targetRevision: HEAD
         path: "{{appPath}}"
       destination:
-        name: "{{path.basename}}"
+        name: "{{name}}"
         namespace: gatekeeper-system
       syncPolicy:
         automated:
